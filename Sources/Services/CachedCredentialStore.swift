@@ -6,7 +6,7 @@ enum PlaintextCredentialCacheStoreError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .unexpectedData:
-            return "本地凭据缓存格式无效。"
+            return L10n.tr("本地凭据缓存格式无效。")
         }
     }
 }

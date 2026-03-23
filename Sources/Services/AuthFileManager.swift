@@ -8,11 +8,11 @@ enum AuthFileManagerError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .missingAuthFile:
-            return "没有找到 ~/.codex/auth.json。"
+            return L10n.tr("没有找到 ~/.codex/auth.json。")
         case let .schemaValidationFailed(message):
-            return "auth.json 校验失败：\(message)"
+            return L10n.tr("auth.json 校验失败：%@", message)
         case .couldNotRestoreBackup:
-            return "auth.json 写入失败且无法恢复备份。"
+            return L10n.tr("auth.json 写入失败且无法恢复备份。")
         }
     }
 }

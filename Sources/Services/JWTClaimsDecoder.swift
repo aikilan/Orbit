@@ -14,9 +14,9 @@ enum JWTClaimsDecoderError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .invalidToken:
-            return "JWT 格式无效。"
+            return L10n.tr("JWT 格式无效。")
         case .missingAccountID:
-            return "JWT 里没有 chatgpt_account_id。"
+            return L10n.tr("JWT 里没有 chatgpt_account_id。")
         }
     }
 }
@@ -39,7 +39,7 @@ struct JWTClaimsDecoder {
         let planType = authClaims?["chatgpt_plan_type"] as? String
         let displayName = (idClaims["name"] as? String)
             ?? email
-            ?? "Account \(accountID.prefix(8))"
+            ?? L10n.tr("Account %@", String(accountID.prefix(8)))
 
         return AuthIdentity(
             accountID: accountID,

@@ -57,7 +57,7 @@ final class AppViewModelTests: XCTestCase {
         await harness.model.switchToAccount(account)
 
         XCTAssertEqual(harness.authFileManager.activatedPayloads.last?.tokens.refreshToken, "refresh_old")
-        XCTAssertTrue(harness.model.database.switchLogs.contains { $0.message.contains("已回退本地缓存凭据") })
+        XCTAssertTrue(harness.model.database.switchLogs.contains { $0.message.contains(L10n.tr("已回退本地缓存凭据")) })
     }
 
     func testSwitchToAccountOffersRestartActionWhenHotReloadNeedsRestart() async throws {
@@ -82,7 +82,7 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertTrue(harness.model.shouldPromptRestartAfterSwitch)
         XCTAssertEqual(
             harness.model.restartPromptMessage,
-            "auth.json 已更新，但运行中的 Codex 仍持有旧授权并触发 refresh_token_reused，建议重启 Codex。"
+            L10n.tr("auth.json 已更新，但运行中的 Codex 仍持有旧授权并触发 refresh_token_reused，建议重启 Codex。")
         )
     }
 
@@ -142,7 +142,10 @@ final class AppViewModelTests: XCTestCase {
         let snapshot = try XCTUnwrap(harness.model.snapshot(for: accountID))
         XCTAssertEqual(snapshot.primary.remainingPercentText, "100%")
         XCTAssertEqual(snapshot.secondary.remainingPercentText, "68%")
-        XCTAssertEqual(refreshedAccount.lastStatusMessage, "状态与额度已更新：剩余 5h 100% / 7d 68%。")
+        XCTAssertEqual(
+            refreshedAccount.lastStatusMessage,
+            L10n.tr("状态与额度已更新：剩余 %@。", L10n.tr("5h %@ / 7d %@", "100%", "68%"))
+        )
         XCTAssertEqual(refreshedAccount.subscriptionDetails?.allowed, true)
         XCTAssertEqual(refreshedAccount.subscriptionDetails?.limitReached, false)
     }
@@ -245,7 +248,7 @@ final class AppViewModelTests: XCTestCase {
         let account = try XCTUnwrap(harness.model.accounts.first)
 
         await harness.model.openCodexCLI(for: account, workingDirectoryURL: makeWorkingDirectoryURL("auto-dismiss-cli"))
-        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 打开 Codex CLI。")
+        XCTAssertEqual(harness.model.banner?.message, L10n.tr("已为账号 %@ 打开 Codex CLI。", account.displayName))
 
         try? await Task.sleep(for: .milliseconds(120))
 
@@ -272,7 +275,7 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertTrue(harness.model.shouldPromptRestartAfterSwitch)
         XCTAssertEqual(
             harness.model.restartPromptMessage,
-            "auth.json 已更新，但运行中的 Codex 仍持有旧授权并触发 refresh_token_reused，建议重启 Codex。"
+            L10n.tr("auth.json 已更新，但运行中的 Codex 仍持有旧授权并触发 refresh_token_reused，建议重启 Codex。")
         )
     }
 
@@ -402,7 +405,7 @@ final class AppViewModelTests: XCTestCase {
 
         XCTAssertEqual(launcher.launchCallCount, 0)
         XCTAssertNil(launcher.lastPayload)
-        XCTAssertEqual(harness.model.banner?.message, "当前活跃的 ChatGPT 账号不能直接启动独立实例，避免触发 refresh_token_reused。")
+        XCTAssertEqual(harness.model.banner?.message, L10n.tr("当前活跃的 ChatGPT 账号不能直接启动独立实例，避免触发 refresh_token_reused。"))
         XCTAssertFalse(harness.model.isLaunchingIsolatedInstance(for: account.id))
     }
 
@@ -434,7 +437,7 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(launcher.launchCallCount, 1)
         XCTAssertEqual(launcher.lastPayload, cachedPayload)
         XCTAssertEqual(try harness.credentialStore.load(for: accountID), cachedPayload)
-        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 启动独立 Codex 实例。")
+        XCTAssertEqual(harness.model.banner?.message, L10n.tr("已为账号 %@ 启动独立 Codex 实例。", account.displayName))
         XCTAssertTrue(harness.model.hasLaunchedIsolatedInstance(for: account.id))
         XCTAssertFalse(harness.model.canLaunchIsolatedCodex(for: account))
         XCTAssertFalse(harness.model.isLaunchingIsolatedInstance(for: account.id))
@@ -480,8 +483,8 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(launcher.lastPayload, refreshedPayload)
         XCTAssertEqual(launcher.lastAppSupportDirectoryURL, harness.model.paths.appSupportDirectoryURL)
         XCTAssertEqual(try harness.credentialStore.load(for: accountID), refreshedPayload)
-        XCTAssertTrue(harness.model.database.switchLogs.contains { $0.message.contains("独立实例启动前已在线刷新账号") })
-        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 启动独立 Codex 实例。")
+        XCTAssertTrue(harness.model.database.switchLogs.contains { $0.message.contains(L10n.tr("独立实例启动前已在线刷新账号")) })
+        XCTAssertEqual(harness.model.banner?.message, L10n.tr("已为账号 %@ 启动独立 Codex 实例。", account.displayName))
         XCTAssertTrue(harness.model.hasLaunchedIsolatedInstance(for: account.id))
         XCTAssertFalse(harness.model.canLaunchIsolatedCodex(for: account))
         XCTAssertFalse(harness.model.isLaunchingIsolatedInstance(for: account.id))
@@ -510,8 +513,12 @@ final class AppViewModelTests: XCTestCase {
 
         XCTAssertEqual(launcher.launchCallCount, 1)
         XCTAssertEqual(launcher.lastPayload, cachedPayload)
-        XCTAssertTrue(harness.model.database.switchLogs.contains { $0.message.contains("独立实例启动前在线刷新账号 Cached User 失败") })
-        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 启动独立 Codex 实例。")
+        XCTAssertTrue(
+            harness.model.database.switchLogs.contains {
+                $0.message.contains(L10n.tr("独立实例启动前在线刷新账号 %@ 失败", "Cached User"))
+            }
+        )
+        XCTAssertEqual(harness.model.banner?.message, L10n.tr("已为账号 %@ 启动独立 Codex 实例。", account.displayName))
         XCTAssertTrue(harness.model.hasLaunchedIsolatedInstance(for: account.id))
         XCTAssertFalse(harness.model.canLaunchIsolatedCodex(for: account))
         XCTAssertFalse(harness.model.isLaunchingIsolatedInstance(for: account.id))
@@ -538,7 +545,7 @@ final class AppViewModelTests: XCTestCase {
         await harness.model.launchIsolatedCodex(for: account)
 
         XCTAssertEqual(launcher.launchCallCount, 1)
-        XCTAssertEqual(harness.model.banner?.message, "账号 \(account.displayName) 的独立实例已在当前会话中启动。")
+        XCTAssertEqual(harness.model.banner?.message, L10n.tr("账号 %@ 的独立实例已在当前会话中启动。", account.displayName))
         XCTAssertTrue(harness.model.hasLaunchedIsolatedInstance(for: account.id))
         XCTAssertFalse(harness.model.canLaunchIsolatedCodex(for: account))
     }
@@ -572,7 +579,7 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(cliLauncher.lastMode, .globalCurrentAuth)
         XCTAssertEqual(cliLauncher.lastWorkingDirectoryURL, workingDirectoryURL)
         XCTAssertEqual(harness.model.cliWorkingDirectories(for: account.id), [workingDirectoryURL.path])
-        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 打开 Codex CLI。")
+        XCTAssertEqual(harness.model.banner?.message, L10n.tr("已为账号 %@ 打开 Codex CLI。", account.displayName))
         XCTAssertFalse(harness.model.isLaunchingCLI(for: account.id))
     }
 
@@ -618,8 +625,8 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(cliLauncher.lastWorkingDirectoryURL, workingDirectoryURL)
         XCTAssertEqual(try harness.credentialStore.load(for: accountID), refreshedPayload)
         XCTAssertEqual(harness.model.cliWorkingDirectories(for: account.id), [workingDirectoryURL.path])
-        XCTAssertTrue(harness.model.database.switchLogs.contains { $0.message.contains("打开 CLI 前已在线刷新账号") })
-        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 打开 Codex CLI。")
+        XCTAssertTrue(harness.model.database.switchLogs.contains { $0.message.contains(L10n.tr("打开 CLI 前已在线刷新账号")) })
+        XCTAssertEqual(harness.model.banner?.message, L10n.tr("已为账号 %@ 打开 Codex CLI。", account.displayName))
         XCTAssertFalse(harness.model.isLaunchingCLI(for: account.id))
     }
 
@@ -649,8 +656,12 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(cliLauncher.lastMode, .isolatedAccount(payload: cachedPayload))
         XCTAssertEqual(cliLauncher.lastWorkingDirectoryURL, workingDirectoryURL)
         XCTAssertEqual(harness.model.cliWorkingDirectories(for: account.id), [workingDirectoryURL.path])
-        XCTAssertTrue(harness.model.database.switchLogs.contains { $0.message.contains("打开 CLI 前在线刷新账号 Cached User 失败") })
-        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 打开 Codex CLI。")
+        XCTAssertTrue(
+            harness.model.database.switchLogs.contains {
+                $0.message.contains(L10n.tr("打开 CLI 前在线刷新账号 %@ 失败", "Cached User"))
+            }
+        )
+        XCTAssertEqual(harness.model.banner?.message, L10n.tr("已为账号 %@ 打开 Codex CLI。", account.displayName))
         XCTAssertFalse(harness.model.isLaunchingCLI(for: account.id))
     }
 
@@ -680,7 +691,7 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(cliLauncher.lastMode, .isolatedAccount(payload: cachedPayload))
         XCTAssertEqual(cliLauncher.lastWorkingDirectoryURL, workingDirectoryURL)
         XCTAssertEqual(harness.model.cliWorkingDirectories(for: account.id), [workingDirectoryURL.path])
-        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 打开 Codex CLI。")
+        XCTAssertEqual(harness.model.banner?.message, L10n.tr("已为账号 %@ 打开 Codex CLI。", account.displayName))
         XCTAssertFalse(harness.model.isLaunchingCLI(for: account.id))
     }
 
@@ -705,7 +716,7 @@ final class AppViewModelTests: XCTestCase {
 
         await harness.model.openCodexCLI(for: account, workingDirectoryURL: workingDirectoryURL)
 
-        XCTAssertEqual(harness.model.banner?.message, "打开 Codex CLI 失败：cli launch failed")
+        XCTAssertEqual(harness.model.banner?.message, L10n.tr("打开 Codex CLI 失败：%@", "cli launch failed"))
         XCTAssertEqual(harness.model.cliWorkingDirectories(for: account.id), [])
         XCTAssertFalse(harness.model.isLaunchingCLI(for: account.id))
     }

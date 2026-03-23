@@ -13,9 +13,9 @@ enum CredentialStoreError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .itemNotFound:
-            return "没有找到该账号的本地凭据。"
+            return L10n.tr("没有找到该账号的本地凭据。")
         case .unexpectedData:
-            return "本地凭据格式无效。"
+            return L10n.tr("本地凭据格式无效。")
         }
     }
 }

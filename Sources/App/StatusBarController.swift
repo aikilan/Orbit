@@ -25,19 +25,19 @@ final class WindowRouter {
     }
 
     private func existingWindow(for id: String) -> NSWindow? {
-        let title: String?
+        let titles: [String]
 
         switch id {
         case "accounts":
-            title = "Codex Account Switcher"
+            titles = [L10n.tr("Codex Account Switcher")]
         case "add-account":
-            title = "新增账号"
+            titles = [L10n.tr("新增账号"), "新增账号", "Add Account"]
         default:
-            title = nil
+            titles = []
         }
 
-        guard let title else { return nil }
-        return NSApp.windows.first(where: { $0.title == title })
+        guard !titles.isEmpty else { return nil }
+        return NSApp.windows.first(where: { titles.contains($0.title) })
     }
 }
 
@@ -95,7 +95,7 @@ final class StatusBarController: NSObject {
         button.image = AppIconArtwork.menuBarIcon
         button.imageScaling = .scaleProportionallyDown
         button.imagePosition = .imageOnly
-        button.toolTip = "Codex Account Switcher"
+        button.toolTip = L10n.tr("Codex Account Switcher")
         button.target = self
         button.action = #selector(handleStatusItemClick(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -121,6 +121,10 @@ final class StatusBarController: NSObject {
         popover.animates = true
         popover.contentSize = NSSize(width: Self.popoverWidth, height: Self.defaultPopoverHeight)
         popover.contentViewController = NSHostingController(rootView: rootView)
+    }
+
+    func refreshLocalization() {
+        statusItem.button?.toolTip = L10n.tr("Codex Account Switcher")
     }
 
     private func updatePopoverHeight(_ height: CGFloat) {

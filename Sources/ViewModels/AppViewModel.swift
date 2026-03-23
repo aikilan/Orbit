@@ -8,7 +8,7 @@ enum BannerAction: Equatable {
     var title: String {
         switch self {
         case .restartCodex:
-            return "重启 Codex"
+            return L10n.tr("重启 Codex")
         }
     }
 }
@@ -34,23 +34,23 @@ struct LowQuotaSwitchRecommendation: Equatable, Sendable {
     let recommendedSummary: String
 
     var promptTitle: String {
-        "当前账号 5 小时额度偏低"
+        L10n.tr("当前账号 5 小时额度偏低")
     }
 
     var promptMessage: String {
-        "\(activeAccountName) 当前剩余 \(activeSummary)，建议切换到 \(recommendedAccountName)（\(recommendedSummary)）。"
+        L10n.tr("%@ 当前剩余 %@，建议切换到 %@（%@）。", activeAccountName, activeSummary, recommendedAccountName, recommendedSummary)
     }
 
     var switchButtonTitle: String {
-        "切换到 \(recommendedAccountName)"
+        L10n.tr("切换到 %@", recommendedAccountName)
     }
 
     var notificationTitle: String {
-        "Codex 额度提醒"
+        L10n.tr("Codex 额度提醒")
     }
 
     var notificationBody: String {
-        "\(activeAccountName) 的 5 小时额度接近 10%，可切换到 \(recommendedAccountName)（\(recommendedSummary)）。"
+        L10n.tr("%@ 的 5 小时额度接近 10%%，可切换到 %@（%@）。", activeAccountName, recommendedAccountName, recommendedSummary)
     }
 
     var recommendationKey: String {
@@ -67,9 +67,9 @@ enum AddAccountMode: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .browser:
-            return "浏览器登录"
+            return L10n.tr("浏览器登录")
         case .apiKey:
-            return "API Key"
+            return L10n.tr("API Key")
         }
     }
 }
@@ -84,8 +84,9 @@ private enum AccountStatusRefreshOutcome {
 final class AppViewModel: ObservableObject {
     @Published private(set) var database: AppDatabase = .empty
     @Published var selectedAccountID: UUID?
+    @Published private(set) var languagePreference = L10n.currentLanguagePreference
     @Published var addAccountMode: AddAccountMode = .browser
-    @Published var addAccountStatus = "选择浏览器登录或 API Key 接入方式。"
+    @Published var addAccountStatus = L10n.tr("选择浏览器登录或 API Key 接入方式。")
     @Published var addAccountError: String?
     @Published var isAuthenticating = false
     @Published var browserAuthorizeURL: URL?
@@ -260,6 +261,18 @@ final class AppViewModel: ObservableObject {
         return pendingRestartPromptMessage
     }
 
+    func updateLanguagePreference(_ preference: AppLanguagePreference) {
+        guard languagePreference != preference else { return }
+        L10n.setLanguagePreference(preference)
+        languagePreference = preference
+
+        if browserSession == nil, !isAuthenticating, addAccountError == nil {
+            addAccountStatus = L10n.tr("选择浏览器登录或 API Key 接入方式。")
+        }
+
+        (NSApp.delegate as? AppDelegate)?.refreshLocalization()
+    }
+
     func prepare() async {
         guard !hasLoaded else { return }
         hasLoaded = true
@@ -268,13 +281,13 @@ final class AppViewModel: ObservableObject {
             database = try await databaseStore.load()
             selectedAccountID = database.activeAccountID ?? database.accounts.first?.id
         } catch {
-            pushBanner(level: .error, message: "本地数据库读取失败：\(error.localizedDescription)")
+            pushBanner(level: .error, message: L10n.tr("本地数据库读取失败：%@", error.localizedDescription))
         }
 
         do {
             try credentialStore.preload()
         } catch {
-            database.appendLog(level: .warning, message: "本地凭据缓存读取失败，将在需要时回退迁移：\(error.localizedDescription)")
+            database.appendLog(level: .warning, message: L10n.tr("本地凭据缓存读取失败，将在需要时回退迁移：%@", error.localizedDescription))
         }
 
         await importCurrentAuthIfNeeded()
@@ -296,10 +309,10 @@ final class AppViewModel: ObservableObject {
 
             setActiveAccount(account.id)
             selectedAccountID = selectedAccountID ?? account.id
-            database.appendLog(level: .info, message: "已导入当前 ~/.codex/auth.json 对应的账号。")
+            database.appendLog(level: .info, message: L10n.tr("已导入当前 ~/.codex/auth.json 对应的账号。"))
             try await persistDatabase()
         } catch {
-            pushBanner(level: .warning, message: "当前 auth.json 无法导入：\(error.localizedDescription)")
+            pushBanner(level: .warning, message: L10n.tr("当前 auth.json 无法导入：%@", error.localizedDescription))
         }
     }
 
@@ -315,7 +328,7 @@ final class AppViewModel: ObservableObject {
                 if selectedAccountID == previousActiveID {
                     selectedAccountID = database.accounts.first?.id
                 }
-                database.appendLog(level: .info, message: "检测到当前 ~/.codex/auth.json 已清空，已同步当前账号状态。")
+                database.appendLog(level: .info, message: L10n.tr("检测到当前 ~/.codex/auth.json 已清空，已同步当前账号状态。"))
                 try await persistDatabase()
                 return
             }
@@ -337,12 +350,12 @@ final class AppViewModel: ObservableObject {
             }
 
             if previousActiveID != account.id || existingAccountID == nil {
-                database.appendLog(level: .info, message: "检测到当前 ~/.codex/auth.json 正在使用账号 \(account.displayName)，已同步当前账号。")
+                database.appendLog(level: .info, message: L10n.tr("检测到当前 ~/.codex/auth.json 正在使用账号 %@，已同步当前账号。", account.displayName))
             }
 
             try await persistDatabase()
         } catch {
-            database.appendLog(level: .warning, message: "反向检查当前 auth.json 失败：\(error.localizedDescription)")
+            database.appendLog(level: .warning, message: L10n.tr("反向检查当前 auth.json 失败：%@", error.localizedDescription))
             try? await persistDatabase()
         }
     }
@@ -382,7 +395,7 @@ final class AppViewModel: ObservableObject {
                 )
                 database.rememberCLIWorkingDirectory(workingDirectoryURL, for: account.id)
                 try? await persistDatabase()
-                pushBanner(level: .info, message: "已为账号 \(account.displayName) 打开 Codex CLI。")
+                pushBanner(level: .info, message: L10n.tr("已为账号 %@ 打开 Codex CLI。", account.displayName))
                 return
             }
 
@@ -395,10 +408,10 @@ final class AppViewModel: ObservableObject {
                     payload = refreshed.payload
                     try credentialStore.save(refreshed.payload, for: account.id)
                     let refreshedAccount = upsertAccount(identity: refreshed.identity, payload: refreshed.payload, makeActive: false)
-                    database.appendLog(level: .info, message: "打开 CLI 前已在线刷新账号 \(refreshedAccount.displayName) 的凭据。")
+                    database.appendLog(level: .info, message: L10n.tr("打开 CLI 前已在线刷新账号 %@ 的凭据。", refreshedAccount.displayName))
                     try? await persistDatabase()
                 } catch {
-                    database.appendLog(level: .warning, message: "打开 CLI 前在线刷新账号 \(account.displayName) 失败，已回退当前本地凭据：\(error.localizedDescription)")
+                    database.appendLog(level: .warning, message: L10n.tr("打开 CLI 前在线刷新账号 %@ 失败，已回退当前本地凭据：%@", account.displayName, error.localizedDescription))
                     try? await persistDatabase()
                 }
             }
@@ -411,19 +424,19 @@ final class AppViewModel: ObservableObject {
             )
             database.rememberCLIWorkingDirectory(workingDirectoryURL, for: account.id)
             try? await persistDatabase()
-            pushBanner(level: .info, message: "已为账号 \(account.displayName) 打开 Codex CLI。")
+            pushBanner(level: .info, message: L10n.tr("已为账号 %@ 打开 Codex CLI。", account.displayName))
         } catch {
-            pushBanner(level: .error, message: "打开 Codex CLI 失败：\(error.localizedDescription)")
+            pushBanner(level: .error, message: L10n.tr("打开 Codex CLI 失败：%@", error.localizedDescription))
         }
     }
 
     func launchIsolatedCodex(for account: ManagedAccount) async {
         if hasLaunchedIsolatedInstance(for: account.id) {
-            pushBanner(level: .info, message: "账号 \(account.displayName) 的独立实例已在当前会话中启动。")
+            pushBanner(level: .info, message: L10n.tr("账号 %@ 的独立实例已在当前会话中启动。", account.displayName))
             return
         }
         guard canLaunchIsolatedCodex(for: account) else {
-            pushBanner(level: .error, message: "当前活跃的 ChatGPT 账号不能直接启动独立实例，避免触发 refresh_token_reused。")
+            pushBanner(level: .error, message: L10n.tr("当前活跃的 ChatGPT 账号不能直接启动独立实例，避免触发 refresh_token_reused。"))
             return
         }
         guard launchingIsolatedInstanceAccountID == nil else { return }
@@ -452,10 +465,10 @@ final class AppViewModel: ObservableObject {
                     payload = refreshed.payload
                     try credentialStore.save(refreshed.payload, for: account.id)
                     let refreshedAccount = upsertAccount(identity: refreshed.identity, payload: refreshed.payload, makeActive: account.isActive)
-                    database.appendLog(level: .info, message: "独立实例启动前已在线刷新账号 \(refreshedAccount.displayName) 的凭据。")
+                    database.appendLog(level: .info, message: L10n.tr("独立实例启动前已在线刷新账号 %@ 的凭据。", refreshedAccount.displayName))
                     try? await persistDatabase()
                 } catch {
-                    database.appendLog(level: .warning, message: "独立实例启动前在线刷新账号 \(account.displayName) 失败，已回退当前本地凭据：\(error.localizedDescription)")
+                    database.appendLog(level: .warning, message: L10n.tr("独立实例启动前在线刷新账号 %@ 失败，已回退当前本地凭据：%@", account.displayName, error.localizedDescription))
                     try? await persistDatabase()
                 }
             }
@@ -466,15 +479,15 @@ final class AppViewModel: ObservableObject {
                 appSupportDirectoryURL: paths.appSupportDirectoryURL
             )
             launchedIsolatedInstanceAccountIDs.insert(account.id)
-            pushBanner(level: .info, message: "已为账号 \(account.displayName) 启动独立 Codex 实例。")
+            pushBanner(level: .info, message: L10n.tr("已为账号 %@ 启动独立 Codex 实例。", account.displayName))
         } catch {
-            pushBanner(level: .error, message: "启动独立 Codex 实例失败：\(error.localizedDescription)")
+            pushBanner(level: .error, message: L10n.tr("启动独立 Codex 实例失败：%@", error.localizedDescription))
         }
     }
 
     func startBrowserLogin() async {
         addAccountError = nil
-        addAccountStatus = "正在准备浏览器 OAuth。"
+        addAccountStatus = L10n.tr("正在准备浏览器 OAuth。")
         browserCallbackInput = ""
         isAuthenticating = true
 
@@ -485,15 +498,15 @@ final class AppViewModel: ObservableObject {
             browserAuthorizeURL = session.authorizeURL
 
             if let serverErrorDescription = session.serverErrorDescription {
-                addAccountStatus = "浏览器已打开，但本地 1455 回调端口未就绪：\(serverErrorDescription)。请登录后把最终跳转 URL 或 code 粘贴回来。"
+                addAccountStatus = L10n.tr("浏览器已打开，但本地 1455 回调端口未就绪：%@。请登录后把最终跳转 URL 或 code 粘贴回来。", serverErrorDescription)
             } else {
-                addAccountStatus = "浏览器已打开。若没有自动完成，请把最终跳转到 localhost:1455 的完整 URL 或 code 粘贴回来。"
+                addAccountStatus = L10n.tr("浏览器已打开。若没有自动完成，请把最终跳转到 localhost:1455 的完整 URL 或 code 粘贴回来。")
                 waitForBrowserCallback(session)
             }
         } catch {
             addAccountError = error.localizedDescription
-            addAccountStatus = "浏览器登录失败。"
-            database.appendLog(level: .error, message: "浏览器登录失败：\(error.localizedDescription)")
+            addAccountStatus = L10n.tr("浏览器登录失败。")
+            database.appendLog(level: .error, message: L10n.tr("浏览器登录失败：%@", error.localizedDescription))
             try? await persistDatabase()
         }
 
@@ -502,28 +515,28 @@ final class AppViewModel: ObservableObject {
 
     func submitBrowserCallback() async {
         guard let session = browserSession else {
-            addAccountError = "当前没有待完成的浏览器登录会话。"
+            addAccountError = L10n.tr("当前没有待完成的浏览器登录会话。")
             return
         }
 
         let pastedInput = browserCallbackInput
         guard !pastedInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            addAccountError = "请粘贴最终跳转 URL 或 authorization code。"
+            addAccountError = L10n.tr("请粘贴最终跳转 URL 或 authorization code。")
             return
         }
 
         browserWaitTask?.cancel()
         isAuthenticating = true
         addAccountError = nil
-        addAccountStatus = "正在验证你粘贴的回调结果。"
+        addAccountStatus = L10n.tr("正在验证你粘贴的回调结果。")
 
         do {
             let result = try await oauthClient.completeBrowserLogin(session: session, pastedInput: pastedInput)
             try await finalizeLogin(result)
         } catch {
             addAccountError = error.localizedDescription
-            addAccountStatus = "手动回调验证失败。"
-            database.appendLog(level: .error, message: "手动回调验证失败：\(error.localizedDescription)")
+            addAccountStatus = L10n.tr("手动回调验证失败。")
+            database.appendLog(level: .error, message: L10n.tr("手动回调验证失败：%@", error.localizedDescription))
             try? await persistDatabase()
         }
 
@@ -536,11 +549,11 @@ final class AppViewModel: ObservableObject {
         let preferredDisplayName = apiKeyDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !apiKey.isEmpty else {
-            addAccountError = "请输入 API Key。"
+            addAccountError = L10n.tr("请输入 API Key。")
             return
         }
 
-        addAccountStatus = "正在接入 API Key。"
+        addAccountStatus = L10n.tr("正在接入 API Key。")
         isAuthenticating = true
 
         do {
@@ -552,8 +565,8 @@ final class AppViewModel: ObservableObject {
             try await finalizeLogin(AuthLoginResult(payload: payload, identity: identity))
         } catch {
             addAccountError = error.localizedDescription
-            addAccountStatus = "API Key 接入失败。"
-            database.appendLog(level: .error, message: "API Key 接入失败：\(error.localizedDescription)")
+            addAccountStatus = L10n.tr("API Key 接入失败。")
+            database.appendLog(level: .error, message: L10n.tr("API Key 接入失败：%@", error.localizedDescription))
             try? await persistDatabase()
         }
 
@@ -573,7 +586,7 @@ final class AppViewModel: ObservableObject {
             try authFileManager.activatePreservingFileIdentity(payload)
             setActiveAccount(account.id)
             selectedAccountID = account.id
-            database.appendLog(level: .info, message: "已切换到账号 \(account.displayName)。")
+            database.appendLog(level: .info, message: L10n.tr("已切换到账号 %@。", account.displayName))
             try await persistDatabase()
             switchingAccountID = nil
             verifyingSwitchAccountID = account.id
@@ -581,8 +594,8 @@ final class AppViewModel: ObservableObject {
         } catch {
             switchingAccountID = nil
             verifyingSwitchAccountID = nil
-            pushBanner(level: .error, message: "账号切换失败：\(error.localizedDescription)")
-            database.appendLog(level: .error, message: "账号切换失败：\(error.localizedDescription)")
+            pushBanner(level: .error, message: L10n.tr("账号切换失败：%@", error.localizedDescription))
+            database.appendLog(level: .error, message: L10n.tr("账号切换失败：%@", error.localizedDescription))
             try? await persistDatabase()
         }
     }
@@ -593,7 +606,7 @@ final class AppViewModel: ObservableObject {
             return
         }
         database.accounts[index].displayName = trimmed
-        database.appendLog(level: .info, message: "已重命名账号为 \(trimmed)。")
+        database.appendLog(level: .info, message: L10n.tr("已重命名账号为 %@。", trimmed))
         Task {
             try? await persistDatabase()
         }
@@ -630,12 +643,12 @@ final class AppViewModel: ObservableObject {
             selectedAccountID = database.accounts.first?.id
             database.appendLog(
                 level: .info,
-                message: clearCurrentAuth ? "已删除账号并清空当前 ~/.codex/auth.json。" : "已删除账号 \(account.displayName)。"
+                message: clearCurrentAuth ? L10n.tr("已删除账号并清空当前 ~/.codex/auth.json。") : L10n.tr("已删除账号 %@。", account.displayName)
             )
             evaluateLowQuotaSwitchRecommendation()
             try await persistDatabase()
         } catch {
-            pushBanner(level: .error, message: "删除账号失败：\(error.localizedDescription)")
+            pushBanner(level: .error, message: L10n.tr("删除账号失败：%@", error.localizedDescription))
         }
     }
 
@@ -667,11 +680,11 @@ final class AppViewModel: ObservableObject {
         let level: SwitchLogLevel = failureCount == 0 && partialCount == 0 ? .info : .warning
         let message: String
         if failureCount == 0 && partialCount == 0 {
-            message = "已完成 \(successCount) 个账号的状态与额度更新。"
+            message = L10n.tr("已完成 %d 个账号的状态与额度更新。", successCount)
         } else if failureCount == 0 {
-            message = "状态更新完成：成功 \(successCount) 个，部分成功 \(partialCount) 个。"
+            message = L10n.tr("状态更新完成：成功 %d 个，部分成功 %d 个。", successCount, partialCount)
         } else {
-            message = "状态更新完成：成功 \(successCount) 个，部分成功 \(partialCount) 个，失败 \(failureCount) 个。"
+            message = L10n.tr("状态更新完成：成功 %d 个，部分成功 %d 个，失败 %d 个。", successCount, partialCount, failureCount)
         }
         banner = BannerState(level: level, message: message)
         database.appendLog(level: level, message: message)
@@ -688,7 +701,7 @@ final class AppViewModel: ObservableObject {
         apiKeyInput = ""
         apiKeyDisplayName = ""
         addAccountError = nil
-        addAccountStatus = "选择浏览器登录或 API Key 接入方式。"
+        addAccountStatus = L10n.tr("选择浏览器登录或 API Key 接入方式。")
         isAuthenticating = false
     }
 
@@ -698,7 +711,7 @@ final class AppViewModel: ObservableObject {
         try authFileManager.activatePreservingFileIdentity(result.payload)
         setActiveAccount(account.id)
         selectedAccountID = account.id
-        database.appendLog(level: .info, message: "已登录并激活账号 \(account.displayName)。")
+        database.appendLog(level: .info, message: L10n.tr("已登录并激活账号 %@。", account.displayName))
         try await persistDatabase()
         await verifySwitch(at: Date(), for: account.id)
         dismissAddAccountSheet()
@@ -711,7 +724,7 @@ final class AppViewModel: ObservableObject {
         case .apiKey:
             let validatedPayload = try payload.validated()
             let suffix = String((validatedPayload.openAIAPIKey ?? "").suffix(6))
-            let fallbackDisplayName = suffix.isEmpty ? "API Key" : "API Key • \(suffix)"
+            let fallbackDisplayName = suffix.isEmpty ? L10n.tr("API Key") : L10n.tr("API Key • %@", suffix)
             return AuthIdentity(
                 accountID: validatedPayload.accountIdentifier,
                 displayName: preferredDisplayName ?? fallbackDisplayName,
@@ -767,11 +780,11 @@ final class AppViewModel: ObservableObject {
                 }
 
                 let statusMessage = isActive
-                    ? "API Key 模式不支持在线额度同步，已同步当前 ~/.codex/auth.json。"
-                    : "API Key 模式不支持在线额度同步，本地凭据可用。"
+                    ? L10n.tr("API Key 模式不支持在线额度同步，已同步当前 ~/.codex/auth.json。")
+                    : L10n.tr("API Key 模式不支持在线额度同步，本地凭据可用。")
                 let logMessage = isActive
-                    ? "已确认 API Key 账号 \(currentAccount.displayName) 可用，并同步当前 ~/.codex/auth.json。"
-                    : "已确认 API Key 账号 \(currentAccount.displayName) 的本地凭据可用。"
+                    ? L10n.tr("已确认 API Key 账号 %@ 可用，并同步当前 ~/.codex/auth.json。", currentAccount.displayName)
+                    : L10n.tr("已确认 API Key 账号 %@ 的本地凭据可用。", currentAccount.displayName)
 
                 updateStatusMetadata(
                     for: accountID,
@@ -800,8 +813,8 @@ final class AppViewModel: ObservableObject {
             let refreshedAccount = upsertAccount(identity: result.identity, payload: result.payload, makeActive: isActive)
             var outcome: AccountStatusRefreshOutcome = .success
             var bannerLevel: SwitchLogLevel = .info
-            var statusMessage = isActive ? "状态已更新，并同步了当前 ~/.codex/auth.json。" : "状态已更新，账号凭据可用。"
-            var logMessage = "已手动更新账号 \(refreshedAccount.displayName) 的状态。"
+            var statusMessage = isActive ? L10n.tr("状态已更新，并同步了当前 ~/.codex/auth.json。") : L10n.tr("状态已更新，账号凭据可用。")
+            var logMessage = L10n.tr("已手动更新账号 %@ 的状态。", refreshedAccount.displayName)
 
             do {
                 let usage = try await oauthClient.fetchUsageSnapshot(using: result.payload)
@@ -812,11 +825,11 @@ final class AppViewModel: ObservableObject {
 
                 let quotaSummary = usage.snapshot.remainingSummary
                 if usage.limitReached || !usage.allowed {
-                    statusMessage = "状态与额度已更新：剩余 \(quotaSummary)，当前已触达额度限制。"
+                    statusMessage = L10n.tr("状态与额度已更新：剩余 %@，当前已触达额度限制。", quotaSummary)
                 } else {
-                    statusMessage = "状态与额度已更新：剩余 \(quotaSummary)。"
+                    statusMessage = L10n.tr("状态与额度已更新：剩余 %@。", quotaSummary)
                 }
-                logMessage = "已手动更新账号 \(refreshedAccount.displayName) 的状态与额度。"
+                logMessage = L10n.tr("已手动更新账号 %@ 的状态与额度。", refreshedAccount.displayName)
                 updateStatusMetadata(
                     for: refreshedAccount.id,
                     level: .info,
@@ -827,8 +840,8 @@ final class AppViewModel: ObservableObject {
             } catch {
                 outcome = .partial
                 bannerLevel = .warning
-                statusMessage = "状态已更新，但额度同步失败：\(error.localizedDescription)"
-                logMessage = "已手动更新账号 \(refreshedAccount.displayName) 的状态，但额度同步失败。"
+                statusMessage = L10n.tr("状态已更新，但额度同步失败：%@", error.localizedDescription)
+                logMessage = L10n.tr("已手动更新账号 %@ 的状态，但额度同步失败。", refreshedAccount.displayName)
                 updateStatusMetadata(
                     for: refreshedAccount.id,
                     level: .warning,
@@ -855,12 +868,12 @@ final class AppViewModel: ObservableObject {
             }
             return outcome
         } catch {
-            let message = "状态更新失败：\(error.localizedDescription)"
+            let message = L10n.tr("状态更新失败：%@", error.localizedDescription)
             updateStatusMetadata(for: accountID, level: .warning, message: message, checkedAt: Date(), planType: nil)
             if showBanner {
                 banner = BannerState(level: .warning, message: message)
             }
-            database.appendLog(level: .warning, message: "账号状态更新失败：\(error.localizedDescription)")
+            database.appendLog(level: .warning, message: L10n.tr("账号状态更新失败：%@", error.localizedDescription))
             try? await persistDatabase()
             return .failure
         }
@@ -881,10 +894,10 @@ final class AppViewModel: ObservableObject {
             let refreshed = try await oauthClient.refreshAuth(using: cachedPayload)
             try credentialStore.save(refreshed.payload, for: account.id)
             _ = upsertAccount(identity: refreshed.identity, payload: refreshed.payload, makeActive: account.isActive)
-            database.appendLog(level: .info, message: "切换前已在线刷新账号 \(account.displayName) 的凭据。")
+            database.appendLog(level: .info, message: L10n.tr("切换前已在线刷新账号 %@ 的凭据。", account.displayName))
             return refreshed.payload
         } catch {
-            database.appendLog(level: .warning, message: "切换前在线刷新账号 \(account.displayName) 失败，已回退本地缓存凭据：\(error.localizedDescription)")
+            database.appendLog(level: .warning, message: L10n.tr("切换前在线刷新账号 %@ 失败，已回退本地缓存凭据：%@", account.displayName, error.localizedDescription))
             return cachedPayload
         }
     }
@@ -938,9 +951,9 @@ final class AppViewModel: ObservableObject {
                 restartRecommendedAccountID = nil
                 shouldPromptRestartAfterSwitch = false
                 pendingRestartPromptMessage = nil
-                pushBanner(level: .info, message: "已请求重启 Codex，新的授权信息会在应用恢复后重新加载。")
+                pushBanner(level: .info, message: L10n.tr("已请求重启 Codex，新的授权信息会在应用恢复后重新加载。"))
             } catch {
-                pushBanner(level: .error, message: "重启 Codex 失败：\(error.localizedDescription)", action: .restartCodex)
+                pushBanner(level: .error, message: L10n.tr("重启 Codex 失败：%@", error.localizedDescription), action: .restartCodex)
             }
 
             isRestartingCodex = false
@@ -960,9 +973,9 @@ final class AppViewModel: ObservableObject {
             restartRecommendedAccountID = nil
             shouldPromptRestartAfterSwitch = false
             pendingRestartPromptMessage = nil
-            pushBanner(level: .info, message: "Codex 运行态已经观测到新的认证/额度事件。")
+            pushBanner(level: .info, message: L10n.tr("Codex 运行态已经观测到新的认证/额度事件。"))
         case .restartRecommended:
-            let message = "auth.json 已更新，但未观测到运行中 Codex 的热重载，可直接重启 Codex。"
+            let message = L10n.tr("auth.json 已更新，但未观测到运行中 Codex 的热重载，可直接重启 Codex。")
             let action: BannerAction? = runtimeInspector.isCodexDesktopRunning() ? .restartCodex : nil
             restartRecommendedAccountID = action == nil ? nil : accountID
             shouldPromptRestartAfterSwitch = action != nil
@@ -972,15 +985,15 @@ final class AppViewModel: ObservableObject {
             restartRecommendedAccountID = nil
             shouldPromptRestartAfterSwitch = false
             pendingRestartPromptMessage = nil
-            pushBanner(level: .info, message: "auth.json 已更新；当前没有检测到运行中的 Codex 桌面端。")
+            pushBanner(level: .info, message: L10n.tr("auth.json 已更新；当前没有检测到运行中的 Codex 桌面端。"))
         case .authError(.refreshTokenReused):
-            let message = "auth.json 已更新，但运行中的 Codex 仍持有旧授权并触发 refresh_token_reused，建议重启 Codex。"
+            let message = L10n.tr("auth.json 已更新，但运行中的 Codex 仍持有旧授权并触发 refresh_token_reused，建议重启 Codex。")
             restartRecommendedAccountID = accountID
             shouldPromptRestartAfterSwitch = true
             pendingRestartPromptMessage = message
             pushBanner(level: .warning, message: message, action: .restartCodex)
         case let .authError(.generic(message)):
-            let promptMessage = "auth.json 已更新，但运行中的 Codex 返回了认证错误：\(message)"
+            let promptMessage = L10n.tr("auth.json 已更新，但运行中的 Codex 返回了认证错误：%@", message)
             restartRecommendedAccountID = accountID
             shouldPromptRestartAfterSwitch = true
             pendingRestartPromptMessage = promptMessage
@@ -1020,7 +1033,7 @@ final class AppViewModel: ObservableObject {
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     self.database.updateSnapshot(snapshot, for: accountID)
-                    self.database.appendLog(level: .info, message: "已为当前账号归档一条新的额度快照。")
+                    self.database.appendLog(level: .info, message: L10n.tr("已为当前账号归档一条新的额度快照。"))
                     self.evaluateLowQuotaSwitchRecommendation()
                     try? await self.persistDatabase()
                 }
@@ -1028,7 +1041,7 @@ final class AppViewModel: ObservableObject {
             onSignal: { [weak self] accountID, date in
                 Task { @MainActor [weak self] in
                     guard let self, self.database.snapshot(for: accountID) == nil else { return }
-                    self.database.appendLog(level: .info, message: "检测到本地 Codex 发出额度更新信号：\(date.formatted(date: .abbreviated, time: .standard))")
+                    self.database.appendLog(level: .info, message: L10n.tr("检测到本地 Codex 发出额度更新信号：%@", date.formatted(date: .abbreviated, time: .standard)))
                     try? await self.persistDatabase()
                 }
             }
@@ -1055,12 +1068,12 @@ final class AppViewModel: ObservableObject {
             guard let self else { return }
             do {
                 let result = try await self.oauthClient.completeBrowserLogin(session: session)
-                self.addAccountStatus = "浏览器回调已收到，正在完成登录。"
+                self.addAccountStatus = L10n.tr("浏览器回调已收到，正在完成登录。")
                 try await self.finalizeLogin(result)
             } catch {
                 guard !Task.isCancelled else { return }
                 self.addAccountError = error.localizedDescription
-                self.addAccountStatus = "未能自动接收浏览器回调。你可以改为手动粘贴 redirect URL 或 code。"
+                self.addAccountStatus = L10n.tr("未能自动接收浏览器回调。你可以改为手动粘贴 redirect URL 或 code。")
             }
         }
     }
@@ -1117,7 +1130,7 @@ final class AppViewModel: ObservableObject {
 
         database.appendLog(
             level: .warning,
-            message: "当前账号 \(activeAccount.displayName) 的 5 小时额度已接近阈值，推荐切换到 \(candidate.account.displayName)。"
+            message: L10n.tr("当前账号 %@ 的 5 小时额度已接近阈值，推荐切换到 %@。", activeAccount.displayName, candidate.account.displayName)
         )
         Task {
             try? await persistDatabase()

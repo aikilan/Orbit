@@ -43,8 +43,8 @@ struct MenuBarStatusIcon: View {
         Image(nsImage: AppIconArtwork.menuBarIcon)
             .renderingMode(.original)
             .frame(width: 20, height: 20)
-            .accessibilityLabel("Codex Account Switcher")
-            .help("Codex Account Switcher")
+            .accessibilityLabel(L10n.tr("Codex Account Switcher"))
+            .help(L10n.tr("Codex Account Switcher"))
     }
 }
 
@@ -74,7 +74,7 @@ enum IconExportError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .failedToEncodePNG(let filename):
-            "无法编码 PNG: \(filename)"
+            L10n.tr("无法编码 PNG: %@", filename)
         }
     }
 }

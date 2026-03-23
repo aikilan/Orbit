@@ -38,13 +38,13 @@ extension QuotaSnapshotSource {
     var displayName: String {
         switch self {
         case .sessionTokenCount:
-            return "本地会话事件"
+            return L10n.tr("本地会话事件")
         case .appServerSignal:
-            return "运行态信号"
+            return L10n.tr("运行态信号")
         case .importedBootstrap:
-            return "本地历史快照"
+            return L10n.tr("本地历史快照")
         case .onlineUsageRefresh:
-            return "在线刷新"
+            return L10n.tr("在线刷新")
         }
     }
 }
@@ -60,6 +60,6 @@ struct QuotaSnapshot: Codable, Hashable, Sendable {
 
 extension QuotaSnapshot {
     var remainingSummary: String {
-        "5h \(primary.remainingPercentText) / 7d \(secondary.remainingPercentText)"
+        L10n.tr("5h %@ / 7d %@", primary.remainingPercentText, secondary.remainingPercentText)
     }
 }

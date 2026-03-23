@@ -21,11 +21,11 @@ enum CodexRuntimeInspectorError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .applicationNotFound:
-            return "没有找到本机安装的 Codex.app。"
+            return L10n.tr("没有找到本机安装的 Codex.app。")
         case .gracefulShutdownTimedOut:
-            return "Codex 没有在预期时间内退出。"
+            return L10n.tr("Codex 没有在预期时间内退出。")
         case let .relaunchFailed(message):
-            return "Codex 重新拉起失败：\(message)"
+            return L10n.tr("Codex 重新拉起失败：%@", message)
         }
     }
 }

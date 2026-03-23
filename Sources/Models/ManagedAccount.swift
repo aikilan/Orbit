@@ -21,32 +21,32 @@ extension SubscriptionDetails {
     var usageStatusText: String {
         var parts = [String]()
         if allowed == false {
-            parts.append("不可用")
+            parts.append(L10n.tr("不可用"))
         }
         if limitReached == true {
-            parts.append("额度受限")
+            parts.append(L10n.tr("额度受限"))
         }
         if parts.isEmpty, allowed == true {
-            parts.append("可用")
+            parts.append(L10n.tr("可用"))
         }
-        return parts.isEmpty ? "未知" : parts.joined(separator: " / ")
+        return parts.isEmpty ? L10n.tr("未知") : parts.joined(separator: " / ")
     }
 
     var availabilityText: String {
         if let allowed {
-            return allowed ? "可用" : "不可用"
+            return allowed ? L10n.tr("可用") : L10n.tr("不可用")
         }
-        return "未知"
+        return L10n.tr("未知")
     }
 
     var limitStatusText: String {
         switch limitReached {
         case .some(true):
-            return "已触达"
+            return L10n.tr("已触达")
         case .some(false):
-            return "未触达"
+            return L10n.tr("未触达")
         case .none:
-            return "未知"
+            return L10n.tr("未知")
         }
     }
 }

@@ -6,7 +6,7 @@ enum CodexCLILauncherError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case let .appleScriptFailed(message):
-            return "通过 Terminal 打开 Codex CLI 失败：\(message)"
+            return L10n.tr("通过 Terminal 打开 Codex CLI 失败：%@", message)
         }
     }
 }
@@ -99,7 +99,7 @@ struct CodexCLILauncher {
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let message = stderr.isEmpty ? (stdout.isEmpty ? "未知错误" : stdout) : stderr
+            let message = stderr.isEmpty ? (stdout.isEmpty ? L10n.tr("未知错误") : stdout) : stderr
             throw CodexCLILauncherError.appleScriptFailed(message)
         }
     }

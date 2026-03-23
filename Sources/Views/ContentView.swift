@@ -25,7 +25,7 @@ struct ContentView: View {
             }
         }
         .confirmationDialog(
-            "删除账号",
+            L10n.tr("删除账号"),
             isPresented: Binding(
                 get: { model.pendingDeleteAccountID != nil },
                 set: { if !$0 { model.cancelPendingDelete() } }
@@ -33,21 +33,21 @@ struct ContentView: View {
             titleVisibility: .visible
         ) {
             if let account = model.pendingDeleteAccount {
-                Button("仅删除本地管理记录", role: .destructive) {
+                Button(L10n.tr("仅删除本地管理记录"), role: .destructive) {
                     Task { await model.deleteAccount(account.id, clearCurrentAuth: false) }
                 }
-                Button("删除并同时清空当前 ~/.codex/auth.json", role: .destructive) {
+                Button(L10n.tr("删除并同时清空当前 ~/.codex/auth.json"), role: .destructive) {
                     Task { await model.deleteAccount(account.id, clearCurrentAuth: true) }
                 }
             }
-            Button("取消", role: .cancel) {
+            Button(L10n.tr("取消"), role: .cancel) {
                 model.cancelPendingDelete()
             }
         } message: {
             if let account = model.pendingDeleteAccount {
-                Text("将删除账号“\(account.displayName)”。如果这是当前激活账号，第二个选项会让本机当前 Codex 处于登出状态。")
+                Text(L10n.tr("将删除账号“%@”。如果这是当前激活账号，第二个选项会让本机当前 Codex 处于登出状态。", account.displayName))
             } else {
-                Text("如果这是当前激活账号，第二个选项会让本机当前 Codex 处于登出状态。")
+                Text(L10n.tr("如果这是当前激活账号，第二个选项会让本机当前 Codex 处于登出状态。"))
             }
         }
     }
@@ -60,12 +60,12 @@ struct ContentView: View {
                         .tag(account.id)
                         .contentShape(Rectangle())
                         .contextMenu {
-                            Button(account.isActive ? "当前正在使用" : "切换到此账号") {
+                            Button(account.isActive ? L10n.tr("当前正在使用") : L10n.tr("切换到此账号")) {
                                 Task { await model.switchToAccount(account) }
                             }
                             .disabled(account.isActive || model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
 
-                            Button(model.isRefreshingStatus(for: account.id) ? "正在更新状态..." : "手动更新状态") {
+                            Button(model.isRefreshingStatus(for: account.id) ? L10n.tr("正在更新状态...") : L10n.tr("手动更新状态")) {
                                 Task { await model.refreshAccountStatus(account) }
                             }
                             .disabled(model.isRefreshingStatus(for: account.id) || model.isRefreshingAllStatuses || model.isSwitchInProgress)
@@ -77,24 +77,44 @@ struct ContentView: View {
                 Button {
                     presentWindow(id: "add-account")
                 } label: {
-                    Label("新增账号", systemImage: "plus.circle.fill")
+                    Label(L10n.tr("新增账号"), systemImage: "plus.circle.fill")
                 }
                 .buttonStyle(.borderedProminent)
 
                 Button {
                     model.openCodexHomeInFinder()
                 } label: {
-                    Label("打开 ~/.codex", systemImage: "folder")
+                    Label(L10n.tr("打开 ~/.codex"), systemImage: "folder")
                 }
                 .buttonStyle(.bordered)
 
                 Button {
                     Task { await model.refreshAllAccountStatuses() }
                 } label: {
-                    Label(model.isRefreshingAllStatuses ? "正在刷新账号状态..." : "刷新全部状态", systemImage: "arrow.clockwise")
+                    Label(model.isRefreshingAllStatuses ? L10n.tr("正在刷新账号状态...") : L10n.tr("刷新全部状态"), systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
                 .disabled(model.isRefreshingAllStatuses || model.accounts.isEmpty)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.tr("语言"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Picker(
+                        L10n.tr("语言"),
+                        selection: Binding(
+                            get: { model.languagePreference },
+                            set: { model.updateLanguagePreference($0) }
+                        )
+                    ) {
+                        ForEach(AppLanguagePreference.allCases) { preference in
+                            Text(preference.title).tag(preference)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                }
 
                 Text(model.paths.codexHome.path)
                     .font(.caption)
@@ -104,7 +124,7 @@ struct ContentView: View {
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .navigationTitle("账号")
+        .navigationTitle(L10n.tr("账号"))
     }
 
     private func presentWindow(id: String) {
@@ -149,9 +169,9 @@ struct ContentView: View {
             )
         } else {
             ContentUnavailableView(
-                "还没有账号",
+                L10n.tr("还没有账号"),
                 systemImage: "person.2.slash",
-                description: Text("先新增一个账号，或者导入当前 ~/.codex/auth.json 对应的账号。")
+                description: Text(L10n.tr("先新增一个账号，或者导入当前 ~/.codex/auth.json 对应的账号。"))
             )
         }
     }
@@ -167,7 +187,7 @@ private struct AccountListRow: View {
                 Text(account.displayName)
                     .font(.headline)
                 if account.isActive {
-                    Text("当前")
+                    Text(L10n.tr("当前"))
                         .font(.caption.bold())
                         .foregroundStyle(.green)
                         .padding(.horizontal, 6)
@@ -182,11 +202,11 @@ private struct AccountListRow: View {
                 .lineLimit(1)
 
             if let snapshot {
-                Label("剩余 \(snapshot.remainingSummary)", systemImage: "gauge.with.dots.needle.67percent")
+                Label(L10n.tr("剩余 %@", snapshot.remainingSummary), systemImage: "gauge.with.dots.needle.67percent")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("额度未同步")
+                Text(L10n.tr("额度未同步"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -221,14 +241,14 @@ private struct AccountDetailView: View {
                     quickActionSection
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("账号详情")
+                        Text(L10n.tr("账号详情"))
                             .font(.largeTitle.bold())
 
                         HStack(alignment: .center, spacing: 12) {
-                            TextField("显示名", text: $draftName)
+                            TextField(L10n.tr("显示名"), text: $draftName)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(maxWidth: 280)
-                            Button("保存名称") {
+                            Button(L10n.tr("保存名称")) {
                                 onRename(draftName)
                             }
                             .buttonStyle(.bordered)
@@ -265,33 +285,33 @@ private struct AccountDetailView: View {
 
     private var infoGrid: some View {
         Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 10) {
-            infoRow("Auth 模式", account.authMode.displayName)
-            infoRow("账号 ID", account.codexAccountID)
+            infoRow(L10n.tr("Auth 模式"), account.authMode.displayName)
+            infoRow(L10n.tr("账号 ID"), account.codexAccountID)
             infoRow(credentialSummaryLabel, credentialSummaryValue)
-            infoRow("套餐类型", account.planType ?? "未知")
+            infoRow(L10n.tr("套餐类型"), account.planType ?? L10n.tr("未知"))
             if let codexUsageStatusText {
-                infoRow("Codex 使用状态", codexUsageStatusText)
+                infoRow(L10n.tr("Codex 使用状态"), codexUsageStatusText)
             }
             if let codexAvailabilityText {
-                infoRow("可用性", codexAvailabilityText)
+                infoRow(L10n.tr("可用性"), codexAvailabilityText)
             }
             if let codexLimitStatusText {
-                infoRow("额度限制", codexLimitStatusText)
+                infoRow(L10n.tr("额度限制"), codexLimitStatusText)
             }
-            infoRow("最后刷新", account.lastRefreshAt?.formatted(date: .abbreviated, time: .standard) ?? "未知")
-            infoRow("最后使用", account.lastUsedAt?.formatted(date: .abbreviated, time: .standard) ?? "从未")
+            infoRow(L10n.tr("最后刷新"), account.lastRefreshAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知"))
+            infoRow(L10n.tr("最后使用"), account.lastUsedAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("从未"))
         }
     }
 
     private var credentialSummaryLabel: String {
-        account.authMode == .apiKey ? "Key 摘要" : "邮箱"
+        account.authMode == .apiKey ? L10n.tr("Key 摘要") : L10n.tr("邮箱")
     }
 
     private var credentialSummaryValue: String {
         if account.authMode == .apiKey {
-            return account.email ?? "未解析"
+            return account.email ?? L10n.tr("未解析")
         }
-        return account.email ?? "未解析"
+        return account.email ?? L10n.tr("未解析")
     }
 
     private var codexUsageStatusText: String? {
@@ -332,27 +352,27 @@ private struct AccountDetailView: View {
 
     private var quotaSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("额度快照")
+            Text(L10n.tr("额度快照"))
                 .font(.title2.bold())
 
             if let snapshot {
                 Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 10) {
-                    infoRow("5 小时剩余", snapshot.primary.remainingPercentText)
-                    infoRow("7 天剩余", snapshot.secondary.remainingPercentText)
-                    infoRow("口径", "剩余百分比（与 Codex 状态面板一致）")
-                    infoRow("计划类型", snapshot.planType ?? "未知")
-                    infoRow("来源", snapshot.source.displayName)
-                    infoRow("采集时间", snapshot.capturedAt.formatted(date: .abbreviated, time: .standard))
-                    infoRow("5 小时重置", snapshot.primary.resetsAt?.formatted(date: .abbreviated, time: .standard) ?? "未知")
-                    infoRow("7 天重置", snapshot.secondary.resetsAt?.formatted(date: .abbreviated, time: .standard) ?? "未知")
+                    infoRow(L10n.tr("5 小时剩余"), snapshot.primary.remainingPercentText)
+                    infoRow(L10n.tr("7 天剩余"), snapshot.secondary.remainingPercentText)
+                    infoRow(L10n.tr("口径"), L10n.tr("剩余百分比（与 Codex 状态面板一致）"))
+                    infoRow(L10n.tr("计划类型"), snapshot.planType ?? L10n.tr("未知"))
+                    infoRow(L10n.tr("来源"), snapshot.source.displayName)
+                    infoRow(L10n.tr("采集时间"), snapshot.capturedAt.formatted(date: .abbreviated, time: .standard))
+                    infoRow(L10n.tr("5 小时重置"), snapshot.primary.resetsAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知"))
+                    infoRow(L10n.tr("7 天重置"), snapshot.secondary.resetsAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知"))
                     if let credits = snapshot.credits {
-                        infoRow("Credits", credits.unlimited ? "unlimited" : (credits.balance.map { "\($0)" } ?? "无"))
+                        infoRow(L10n.tr("Credits"), credits.unlimited ? L10n.tr("unlimited") : (credits.balance.map { "\($0)" } ?? L10n.tr("无")))
                     }
                 }
                 .padding(24)
                 .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             } else {
-                Text("这个账号还没有被可靠归档的本地额度快照。切换到该账号并实际使用一段时间后，应用会从本地会话事件中抓取额度。")
+                Text(L10n.tr("这个账号还没有被可靠归档的本地额度快照。切换到该账号并实际使用一段时间后，应用会从本地会话事件中抓取额度。"))
                     .foregroundStyle(.secondary)
                     .padding(24)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -363,13 +383,13 @@ private struct AccountDetailView: View {
 
     private var statusSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("账号状态")
+            Text(L10n.tr("账号状态"))
                 .font(.title2.bold())
 
             Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 10) {
-                infoRow("上次检查", account.lastStatusCheckAt?.formatted(date: .abbreviated, time: .standard) ?? "尚未手动更新")
-                infoRow("最近结果", account.lastStatusMessage ?? "尚未手动更新")
-                infoRow("说明", "手动更新会在线刷新该账号凭据并同步在线额度；界面统一按剩余百分比展示。")
+                infoRow(L10n.tr("上次检查"), account.lastStatusCheckAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("尚未手动更新"))
+                infoRow(L10n.tr("最近结果"), account.lastStatusMessage ?? L10n.tr("尚未手动更新"))
+                infoRow(L10n.tr("说明"), L10n.tr("手动更新会在线刷新该账号凭据并同步在线额度；界面统一按剩余百分比展示。"))
             }
             .padding(24)
             .background(statusBackgroundColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -378,11 +398,11 @@ private struct AccountDetailView: View {
 
     private var quickActionSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("快捷操作")
+            Text(L10n.tr("快捷操作"))
                 .font(.title2.bold())
 
             HStack {
-                Button(model.isRefreshingStatus(for: account.id) ? "正在更新状态..." : "手动更新状态") {
+                Button(model.isRefreshingStatus(for: account.id) ? L10n.tr("正在更新状态...") : L10n.tr("手动更新状态")) {
                     onRefreshStatus()
                 }
                 .buttonStyle(.bordered)
@@ -405,7 +425,7 @@ private struct AccountDetailView: View {
                         || model.isSwitchInProgress
                 )
 
-                Button(model.isLaunchingCLI(for: account.id) ? "正在打开 CLI..." : "选择目录并打开 CLI") {
+                Button(model.isLaunchingCLI(for: account.id) ? L10n.tr("正在打开 CLI...") : L10n.tr("选择目录并打开 CLI")) {
                     chooseDirectoryAndOpenCLI()
                 }
                 .buttonStyle(.bordered)
@@ -418,7 +438,7 @@ private struct AccountDetailView: View {
                 )
 
                 if model.shouldOfferRestartCodex(for: account) {
-                    Button(model.isRestartingCodex ? "正在重启 Codex..." : "重启 Codex") {
+                    Button(model.isRestartingCodex ? L10n.tr("正在重启 Codex...") : L10n.tr("重启 Codex")) {
                         Task { await model.performBannerAction(.restartCodex) }
                     }
                     .buttonStyle(.bordered)
@@ -436,11 +456,11 @@ private struct AccountDetailView: View {
 
     private var cliDirectoryHistorySection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("已打开目录")
+            Text(L10n.tr("已打开目录"))
                 .font(.title2.bold())
 
             if recentCLIDirectories.isEmpty {
-                Text("还没有打开过目录。先选择一个目录打开 CLI，后续就能从这里快速启动。")
+                Text(L10n.tr("还没有打开过目录。先选择一个目录打开 CLI，后续就能从这里快速启动。"))
                     .foregroundStyle(.secondary)
             } else {
                 VStack(alignment: .leading, spacing: 10) {
@@ -464,10 +484,10 @@ private struct AccountDetailView: View {
 
     private var deleteSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("删除账号")
+            Text(L10n.tr("删除账号"))
                 .font(.title2.bold())
 
-            Button("删除账号", role: .destructive) {
+            Button(L10n.tr("删除账号"), role: .destructive) {
                 onDelete()
             }
             .buttonStyle(.bordered)
@@ -477,38 +497,38 @@ private struct AccountDetailView: View {
 
     private var switchButtonTitle: String {
         if model.isVerifyingSwitch(for: account.id) {
-            return "正在验证热更..."
+            return L10n.tr("正在验证热更...")
         }
         if model.isSwitchingAccount(account.id) {
-            return "正在切换账号..."
+            return L10n.tr("正在切换账号...")
         }
         if account.isActive {
-            return "当前正在使用"
+            return L10n.tr("当前正在使用")
         }
-        return "切换到此账号"
+        return L10n.tr("切换到此账号")
     }
 
     private var isolatedLaunchHelpText: String {
         if model.hasLaunchedIsolatedInstance(for: account.id) {
-            return "该账号的独立实例已在当前会话中启动，为避免重复拉起，当前已禁用再次启动。"
+            return L10n.tr("该账号的独立实例已在当前会话中启动，为避免重复拉起，当前已禁用再次启动。")
         }
         if account.isActive && account.authMode == .chatgpt {
-            return "打开 CLI 会直接使用当前 ~/.codex；当前活跃的 ChatGPT 账号不能再起独立实例，避免触发 refresh_token_reused。"
+            return L10n.tr("打开 CLI 会直接使用当前 ~/.codex；当前活跃的 ChatGPT 账号不能再起独立实例，避免触发 refresh_token_reused。")
         }
         if account.isActive {
-            return "打开 CLI 会直接使用当前 ~/.codex；独立实例仍会使用独立 CODEX_HOME 和 user-data 目录启动，不会改写当前 ~/.codex。"
+            return L10n.tr("打开 CLI 会直接使用当前 ~/.codex；独立实例仍会使用独立 CODEX_HOME 和 user-data 目录启动，不会改写当前 ~/.codex。")
         }
-        return "打开 CLI 时会为该账号使用独立 CODEX_HOME；独立实例也会使用独立 CODEX_HOME 和 user-data 目录启动，不会改写当前 ~/.codex。"
+        return L10n.tr("打开 CLI 时会为该账号使用独立 CODEX_HOME；独立实例也会使用独立 CODEX_HOME 和 user-data 目录启动，不会改写当前 ~/.codex。")
     }
 
     private var isolatedInstanceButtonTitle: String {
         if model.isLaunchingIsolatedInstance(for: account.id) {
-            return "正在启动独立实例..."
+            return L10n.tr("正在启动独立实例...")
         }
         if model.hasLaunchedIsolatedInstance(for: account.id) {
-            return "独立实例已启动"
+            return L10n.tr("独立实例已启动")
         }
-        return "启动独立实例"
+        return L10n.tr("启动独立实例")
     }
 
     private var recentCLIDirectories: [String] {
@@ -521,8 +541,8 @@ private struct AccountDetailView: View {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
-        panel.prompt = "打开 CLI"
-        panel.message = "选择一个目录作为 Codex CLI 的启动目录。"
+        panel.prompt = L10n.tr("打开 CLI")
+        panel.message = L10n.tr("选择一个目录作为 Codex CLI 的启动目录。")
         if let path = recentCLIDirectories.first {
             panel.directoryURL = URL(fileURLWithPath: path, isDirectory: true)
         }
@@ -539,7 +559,7 @@ private struct AccountDetailView: View {
 
     private var pathSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("当前写入路径")
+            Text(L10n.tr("当前写入路径"))
                 .font(.title2.bold())
             Text(authFilePath)
                 .font(.callout.monospaced())
@@ -577,7 +597,7 @@ private struct CLIDirectoryHistoryCard: View {
 
                     Spacer(minLength: 8)
 
-                    Text("点击启动 CLI")
+                    Text(L10n.tr("点击启动 CLI"))
                         .font(.caption.weight(.medium))
                         .foregroundStyle(isDisabled ? .tertiary : .secondary)
                 }
@@ -600,7 +620,7 @@ private struct CLIDirectoryHistoryCard: View {
         .buttonStyle(.plain)
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .disabled(isDisabled)
-        .help(isDisabled ? "当前不可点击" : "点击快速启动 CLI")
+        .help(isDisabled ? L10n.tr("当前不可点击") : L10n.tr("点击快速启动 CLI"))
         .onHover { hovering in
             isHovering = hovering
         }
@@ -630,7 +650,7 @@ private struct BannerView: View {
                 .lineLimit(2)
             Spacer()
             if let action = state.action {
-                Button(isActionInProgress ? "处理中..." : action.title) {
+                Button(isActionInProgress ? L10n.tr("处理中...") : action.title) {
                     onAction(action)
                 }
                 .buttonStyle(.bordered)
@@ -707,12 +727,12 @@ private struct MenuBarAccountRow: View {
                     .lineLimit(1)
 
                 if let snapshot {
-                    Text("剩余 \(snapshot.remainingSummary)")
+                    Text(L10n.tr("剩余 %@", snapshot.remainingSummary))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 } else {
-                    Text("额度未同步")
+                    Text(L10n.tr("额度未同步"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -722,7 +742,7 @@ private struct MenuBarAccountRow: View {
             Spacer(minLength: 12)
 
             if account.isActive {
-                Label("当前", systemImage: "checkmark.circle.fill")
+                Label(L10n.tr("当前"), systemImage: "checkmark.circle.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.green)
             }
@@ -771,17 +791,17 @@ struct MenuBarContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let active = model.activeAccount {
-                Text("当前账号：\(active.displayName)")
+                Text(L10n.tr("当前账号：%@", active.displayName))
                     .font(.headline)
             } else {
-                Text("当前没有激活账号")
+                Text(L10n.tr("当前没有激活账号"))
                     .font(.headline)
             }
 
             Divider()
 
             if model.accounts.isEmpty {
-                Text("暂无账号")
+                Text(L10n.tr("暂无账号"))
                     .foregroundStyle(.secondary)
             } else {
                 ScrollView {
@@ -860,17 +880,17 @@ struct MenuBarContentView: View {
 
     private func switchButtonTitle(for account: ManagedAccount) -> String {
         if model.isVerifyingSwitch(for: account.id) {
-            return "验证中"
+            return L10n.tr("验证中")
         }
         if model.isSwitchingAccount(account.id) {
-            return "切换中"
+            return L10n.tr("切换中")
         }
-        return "切换"
+        return L10n.tr("切换")
     }
 
     private var quickActionsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("快捷操作")
+            Text(L10n.tr("快捷操作"))
                 .font(.caption.bold())
                 .foregroundStyle(.secondary)
 
@@ -882,7 +902,7 @@ struct MenuBarContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     HStack {
-                        Button("稍后") {
+                        Button(L10n.tr("稍后")) {
                             model.dismissLowQuotaSwitchRecommendation()
                         }
                         .buttonStyle(.bordered)
@@ -900,18 +920,18 @@ struct MenuBarContentView: View {
 
             if let promptMessage = model.restartPromptMessage {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("切换完成后，是否现在重启 Codex？")
+                    Text(L10n.tr("切换完成后，是否现在重启 Codex？"))
                         .font(.callout.weight(.medium))
                     Text(promptMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     HStack {
-                        Button("稍后") {
+                        Button(L10n.tr("稍后")) {
                             model.dismissRestartPrompt()
                         }
                         .buttonStyle(.bordered)
 
-                        Button(model.isRestartingCodex ? "正在重启..." : "立即重启 Codex") {
+                        Button(model.isRestartingCodex ? L10n.tr("正在重启...") : L10n.tr("立即重启 Codex")) {
                             Task { await model.performBannerAction(.restartCodex) }
                         }
                         .buttonStyle(.borderedProminent)
@@ -924,18 +944,18 @@ struct MenuBarContentView: View {
 
             VStack(spacing: 10) {
                 HStack(spacing: 10) {
-                    quickActionButton("打开主窗口", systemImage: "macwindow") {
+                    quickActionButton(L10n.tr("打开主窗口"), systemImage: "macwindow") {
                         onOpenAccounts()
                     }
 
-                    quickActionButton("新增账号", systemImage: "plus.circle") {
+                    quickActionButton(L10n.tr("新增账号"), systemImage: "plus.circle") {
                         onOpenAddAccount()
                     }
                 }
 
                 HStack(spacing: 10) {
                     quickActionButton(
-                        model.isRefreshingAllStatuses ? "刷新中" : "刷新状态",
+                        model.isRefreshingAllStatuses ? L10n.tr("刷新中") : L10n.tr("刷新状态"),
                         systemImage: "arrow.clockwise",
                         isDisabled: model.isRefreshingAllStatuses || model.accounts.isEmpty
                     ) {
@@ -944,7 +964,7 @@ struct MenuBarContentView: View {
 
                     if shouldShowStandaloneRestartAction {
                         quickActionButton(
-                            model.isRestartingCodex ? "正在重启" : "重启 Codex",
+                            model.isRestartingCodex ? L10n.tr("正在重启") : L10n.tr("重启 Codex"),
                             systemImage: "power",
                             isProminent: true,
                             isDisabled: model.isRestartingCodex
@@ -952,14 +972,14 @@ struct MenuBarContentView: View {
                             Task { await model.performBannerAction(.restartCodex) }
                         }
                     } else {
-                        quickActionButton("退出应用", systemImage: "xmark.circle") {
+                        quickActionButton(L10n.tr("退出应用"), systemImage: "xmark.circle") {
                             NSApp.terminate(nil)
                         }
                     }
                 }
 
                 if shouldShowStandaloneRestartAction {
-                    quickActionButton("退出应用", systemImage: "xmark.circle") {
+                    quickActionButton(L10n.tr("退出应用"), systemImage: "xmark.circle") {
                         NSApp.terminate(nil)
                     }
                 }

@@ -99,31 +99,31 @@ enum OAuthClientError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .couldNotOpenBrowser:
-            return "无法拉起系统浏览器。"
+            return L10n.tr("无法拉起系统浏览器。")
         case .callbackServerFailed:
-            return "本地回调服务器启动失败。"
+            return L10n.tr("本地回调服务器启动失败。")
         case .invalidCallback:
-            return "浏览器回调参数无效。"
+            return L10n.tr("浏览器回调参数无效。")
         case let .oauthRejected(error):
-            return "OpenAI 授权被拒绝：\(error)"
+            return L10n.tr("OpenAI 授权被拒绝：%@", error)
         case .stateMismatch:
-            return "浏览器回调 state 校验失败。"
+            return L10n.tr("浏览器回调 state 校验失败。")
         case .invalidTokenResponse:
-            return "OpenAI token 响应缺少必要字段。"
+            return L10n.tr("OpenAI token 响应缺少必要字段。")
         case .loginTimedOut:
-            return "登录等待超时。"
+            return L10n.tr("登录等待超时。")
         case .manualCallbackRequired:
-            return "当前需要手动粘贴浏览器最终跳转的 redirect URL 或 authorization code。"
+            return L10n.tr("当前需要手动粘贴浏览器最终跳转的 redirect URL 或 authorization code。")
         case .deviceAuthorizationPending:
-            return "设备码仍在等待授权。"
+            return L10n.tr("设备码仍在等待授权。")
         case .deviceFlowExpired:
-            return "设备码已过期。"
+            return L10n.tr("设备码已过期。")
         case let .deviceFlowRejected(message):
-            return "设备码登录失败：\(message)"
+            return L10n.tr("设备码登录失败：%@", message)
         case .invalidUsageResponse:
-            return "额度接口返回的数据结构无效。"
+            return L10n.tr("额度接口返回的数据结构无效。")
         case let .httpFailure(code, body):
-            return "OpenAI 接口返回 \(code)：\(body)"
+            return L10n.tr("OpenAI 接口返回 %d：%@", code, body)
         }
     }
 }

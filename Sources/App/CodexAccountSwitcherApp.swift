@@ -12,12 +12,12 @@ struct CodexAccountSwitcherApp: App {
     }
 
     var body: some Scene {
-        Window("Codex Account Switcher", id: "accounts") {
+        Window(L10n.tr("Codex Account Switcher"), id: "accounts") {
             ContentView(model: model)
                 .frame(minWidth: 960, minHeight: 620)
         }
 
-        Window("新增账号", id: "add-account") {
+        Window(L10n.tr("新增账号"), id: "add-account") {
             AddAccountSheet(model: model)
                 .frame(minWidth: 620, minHeight: 520)
         }

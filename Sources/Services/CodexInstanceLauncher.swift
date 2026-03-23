@@ -8,9 +8,9 @@ enum CodexInstanceLauncherError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .applicationNotFound:
-            return "没有找到本机安装的 Codex.app。"
+            return L10n.tr("没有找到本机安装的 Codex.app。")
         case .executableNotFound:
-            return "Codex.app 的可执行文件不存在或不可执行。"
+            return L10n.tr("Codex.app 的可执行文件不存在或不可执行。")
         }
     }
 }

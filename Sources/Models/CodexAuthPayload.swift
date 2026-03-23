@@ -9,7 +9,7 @@ enum CodexAuthMode: String, Codable, CaseIterable, Sendable {
         case .chatgpt:
             return "ChatGPT"
         case .apiKey:
-            return "API Key"
+            return L10n.tr("API Key")
         }
     }
 }
@@ -116,7 +116,7 @@ struct CodexAuthPayload: Codable, Equatable, Sendable {
     var credentialSummary: String? {
         guard authMode == .apiKey, let openAIAPIKey, !openAIAPIKey.isEmpty else { return nil }
         let tail = String(openAIAPIKey.suffix(6))
-        return tail.isEmpty ? "API Key" : "sk-...\(tail)"
+        return tail.isEmpty ? L10n.tr("API Key") : "sk-...\(tail)"
     }
 
     private static func apiKeyAccountIdentifier(for apiKey: String) -> String {
@@ -139,15 +139,15 @@ enum CodexAuthPayloadError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .unsupportedAuthMode:
-            return "不支持当前 auth_mode。"
+            return L10n.tr("不支持当前 auth_mode。")
         case .unexpectedAPIKeyForChatGPT:
-            return "ChatGPT 认证模式下不应包含 API Key。"
+            return L10n.tr("ChatGPT 认证模式下不应包含 API Key。")
         case .missingAPIKey:
-            return "auth.json 缺少 OPENAI_API_KEY。"
+            return L10n.tr("auth.json 缺少 OPENAI_API_KEY。")
         case .missingTokenData:
-            return "auth.json 缺少必要的 token 字段。"
+            return L10n.tr("auth.json 缺少必要的 token 字段。")
         case .invalidRefreshTimestamp:
-            return "auth.json 的 last_refresh 不是有效的 ISO8601 时间。"
+            return L10n.tr("auth.json 的 last_refresh 不是有效的 ISO8601 时间。")
         }
     }
 }
