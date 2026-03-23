@@ -11,6 +11,9 @@ Codex Account Switcher is a native macOS menu bar app for managing multiple Code
 - Add API key accounts for local credential switching.
 - Switch the active account without manually editing `~/.codex/auth.json`.
 - Review account details such as plan type, Codex usage status, availability, quota limit state, last refresh time, and last used time.
+- Open Codex CLI directly from the selected account in the account detail view.
+- Choose a working directory before launching CLI, and reopen previously used directories from the per-account history list.
+- Use the current global `~/.codex` for the active account, or launch CLI with an isolated `CODEX_HOME` for other accounts without rewriting the global auth file.
 - Archive quota snapshots from local Codex artifacts: `~/.codex/sessions/*.jsonl` and `~/.codex/state_5.sqlite`.
 - Refresh online usage data for supported ChatGPT accounts through `/wham/usage`.
 - Recommend switching when the active account is running low on the 5-hour budget.
