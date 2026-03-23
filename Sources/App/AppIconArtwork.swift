@@ -7,8 +7,8 @@ enum AppIconArtwork {
 
     static let menuBarIcon: NSImage = {
         let image = IconRenderer.makeMenuBarIcon()
-        image.isTemplate = true
-        image.size = NSSize(width: 14, height: 14)
+        image.isTemplate = false
+        image.size = NSSize(width: 20, height: 20)
         return image
     }()
 
@@ -41,9 +41,8 @@ enum AppIconArtwork {
 struct MenuBarStatusIcon: View {
     var body: some View {
         Image(nsImage: AppIconArtwork.menuBarIcon)
-            .renderingMode(.template)
-            .frame(width: 14, height: 14)
-            .padding(.vertical, 1)
+            .renderingMode(.original)
+            .frame(width: 20, height: 20)
             .accessibilityLabel("Codex Account Switcher")
             .help("Codex Account Switcher")
     }
@@ -86,6 +85,11 @@ private enum IconRenderer {
         case right
     }
 
+    private enum TileBackgroundStyle {
+        case dark
+        case light
+    }
+
     static func makeAppIcon() -> NSImage {
         makeImage(pixelWidth: 1024, pixelHeight: 1024) { rect in
             drawAppIcon(in: rect)
@@ -94,7 +98,7 @@ private enum IconRenderer {
 
     static func makeMenuBarIcon() -> NSImage {
         makeImage(pixelWidth: 72, pixelHeight: 72) { rect in
-            drawMenuBarIcon(in: rect.insetBy(dx: 8, dy: 8))
+            drawMenuBarIcon(in: rect.insetBy(dx: 2, dy: 2))
         }
     }
 
@@ -140,21 +144,44 @@ private enum IconRenderer {
     }
 
     private static func drawAppIcon(in rect: CGRect) {
+        drawBrandedIcon(in: rect, backgroundStyle: .dark)
+    }
+
+    private static func drawMenuBarIcon(in rect: CGRect) {
+        drawBrandedIcon(in: rect, backgroundStyle: .light)
+    }
+
+    private static func drawBrandedIcon(in rect: CGRect, backgroundStyle: TileBackgroundStyle) {
         let tileRect = rect.insetBy(dx: rect.width * 0.085, dy: rect.height * 0.085)
         let tileRadius = tileRect.width * 0.23
         let tilePath = NSBezierPath(roundedRect: tileRect, xRadius: tileRadius, yRadius: tileRadius)
 
-        withShadow(color: NSColor.black.withAlphaComponent(0.28), blur: 28, offset: NSSize(width: 0, height: -10)) {
-            NSColor(hex: 0x081018).setFill()
-            tilePath.fill()
-        }
+        switch backgroundStyle {
+        case .dark:
+            withShadow(color: NSColor.black.withAlphaComponent(0.28), blur: 28, offset: NSSize(width: 0, height: -10)) {
+                NSColor(hex: 0x081018).setFill()
+                tilePath.fill()
+            }
 
-        tilePath.addClip()
-        NSGradient(colors: [
-            NSColor(hex: 0x081522),
-            NSColor(hex: 0x0D2B42),
-            NSColor(hex: 0x0E5B73),
-        ])?.draw(in: tilePath, angle: -36)
+            tilePath.addClip()
+            NSGradient(colors: [
+                NSColor(hex: 0x081522),
+                NSColor(hex: 0x0D2B42),
+                NSColor(hex: 0x0E5B73),
+            ])?.draw(in: tilePath, angle: -36)
+
+        case .light:
+            withShadow(color: NSColor.black.withAlphaComponent(0.16), blur: rect.width * 0.06, offset: NSSize(width: 0, height: -2)) {
+                NSColor.white.setFill()
+                tilePath.fill()
+            }
+
+            tilePath.addClip()
+            NSGradient(colors: [
+                NSColor.white,
+                NSColor(hex: 0xF5F8FC),
+            ])?.draw(in: tilePath, angle: 90)
+        }
 
         drawGlow(
             center: CGPoint(x: tileRect.minX + tileRect.width * 0.28, y: tileRect.maxY - tileRect.height * 0.22),
@@ -213,46 +240,14 @@ private enum IconRenderer {
         drawSwitchPanel(in: switchPanel)
 
         let borderPath = NSBezierPath(roundedRect: tileRect.insetBy(dx: 1, dy: 1), xRadius: tileRadius - 1, yRadius: tileRadius - 1)
-        NSColor.white.withAlphaComponent(0.08).setStroke()
+        switch backgroundStyle {
+        case .dark:
+            NSColor.white.withAlphaComponent(0.08).setStroke()
+        case .light:
+            NSColor.black.withAlphaComponent(0.08).setStroke()
+        }
         borderPath.lineWidth = 2
         borderPath.stroke()
-    }
-
-    private static func drawMenuBarIcon(in rect: CGRect) {
-        let strokeColor = NSColor.black
-        let strokeWidth = rect.width * 0.07
-
-        let backCard = CGRect(
-            x: rect.minX + rect.width * 0.08,
-            y: rect.midY - rect.height * 0.02,
-            width: rect.width * 0.54,
-            height: rect.height * 0.34
-        )
-        let frontCard = CGRect(
-            x: rect.minX + rect.width * 0.32,
-            y: rect.minY + rect.height * 0.14,
-            width: rect.width * 0.54,
-            height: rect.height * 0.34
-        )
-
-        strokeRoundedRect(backCard, radius: rect.width * 0.09, color: strokeColor, lineWidth: strokeWidth)
-        strokeRoundedRect(frontCard, radius: rect.width * 0.09, color: strokeColor, lineWidth: strokeWidth)
-
-        let topArrowRect = CGRect(
-            x: rect.minX + rect.width * 0.22,
-            y: rect.midY + rect.height * 0.03,
-            width: rect.width * 0.5,
-            height: rect.height * 0.12
-        )
-        let bottomArrowRect = CGRect(
-            x: rect.minX + rect.width * 0.28,
-            y: rect.minY + rect.height * 0.23,
-            width: rect.width * 0.5,
-            height: rect.height * 0.12
-        )
-
-        drawArrow(in: topArrowRect, direction: .right, fillColors: [strokeColor, strokeColor])
-        drawArrow(in: bottomArrowRect, direction: .left, fillColors: [strokeColor, strokeColor])
     }
 
     private static func drawGrid(in rect: CGRect, clipPath: NSBezierPath) {

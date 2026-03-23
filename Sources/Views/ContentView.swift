@@ -384,6 +384,12 @@ private struct AccountDetailView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(account.isActive || model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
 
+                Button(model.isLaunchingIsolatedInstance(for: account.id) ? "正在启动独立实例..." : "启动独立实例") {
+                    Task { await model.launchIsolatedCodex(for: account) }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canLaunchIsolatedCodex(for: account) || model.isLaunchingIsolatedInstance(for: account.id) || model.isSwitchInProgress)
+
                 if model.shouldOfferRestartCodex(for: account) {
                     Button(model.isRestartingCodex ? "正在重启 Codex..." : "重启 Codex") {
                         Task { await model.performBannerAction(.restartCodex) }
@@ -398,6 +404,10 @@ private struct AccountDetailView: View {
                 .buttonStyle(.bordered)
                 .disabled(model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
             }
+
+            Text(isolatedLaunchHelpText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -412,6 +422,13 @@ private struct AccountDetailView: View {
             return "当前正在使用"
         }
         return "切换到此账号"
+    }
+
+    private var isolatedLaunchHelpText: String {
+        if account.isActive && account.authMode == .chatgpt {
+            return "当前活跃的 ChatGPT 账号不能再起独立实例，避免触发 refresh_token_reused。"
+        }
+        return "独立实例会使用该账号自己的 CODEX_HOME 和 user-data 目录启动，不会改写当前 ~/.codex。"
     }
 
     private var pathSection: some View {

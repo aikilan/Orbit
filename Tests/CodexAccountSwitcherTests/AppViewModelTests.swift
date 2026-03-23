@@ -351,6 +351,140 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertNil(harness.model.lowQuotaSwitchRecommendation)
     }
 
+    func testLaunchIsolatedCodexBlocksActiveChatGPTAccount() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let launcher = RecordingCodexInstanceLauncher()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            activeAccountID: accountID,
+            instanceLauncher: launcher
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.accounts.first)
+
+        XCTAssertTrue(account.isActive)
+        XCTAssertFalse(harness.model.canLaunchIsolatedCodex(for: account))
+
+        await harness.model.launchIsolatedCodex(for: account)
+
+        XCTAssertEqual(launcher.launchCallCount, 0)
+        XCTAssertNil(launcher.lastPayload)
+        XCTAssertEqual(harness.model.banner?.message, "当前活跃的 ChatGPT 账号不能直接启动独立实例，避免触发 refresh_token_reused。")
+        XCTAssertFalse(harness.model.isLaunchingIsolatedInstance(for: account.id))
+    }
+
+    func testLaunchIsolatedCodexAllowsActiveAPIKeyAccount() async throws {
+        let accountID = UUID()
+        let cachedPayload = try makeAPIKeyPayload("sk-test-old")
+        let authFileManager = RecordingAuthFileManager()
+        authFileManager.currentAuth = cachedPayload
+        let launcher = RecordingCodexInstanceLauncher()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: authFileManager,
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            activeAccountID: accountID,
+            instanceLauncher: launcher
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.accounts.first)
+
+        XCTAssertTrue(account.isActive)
+        XCTAssertTrue(harness.model.canLaunchIsolatedCodex(for: account))
+
+        await harness.model.launchIsolatedCodex(for: account)
+
+        XCTAssertEqual(launcher.launchCallCount, 1)
+        XCTAssertEqual(launcher.lastPayload, cachedPayload)
+        XCTAssertEqual(try harness.credentialStore.load(for: accountID), cachedPayload)
+        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 启动独立 Codex 实例。")
+        XCTAssertFalse(harness.model.isLaunchingIsolatedInstance(for: account.id))
+    }
+
+    func testLaunchIsolatedCodexRefreshesChatGPTPayloadBeforeLaunching() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let refreshedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_new")
+        let launcher = RecordingCodexInstanceLauncher()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(
+                refreshResult: .success(
+                    AuthLoginResult(
+                        payload: refreshedPayload,
+                        identity: AuthIdentity(
+                            accountID: "acct_cached",
+                            displayName: "Refreshed User",
+                            email: "refresh@example.com",
+                            planType: "plus"
+                        )
+                    )
+                )
+            ),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            instanceLauncher: launcher
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.accounts.first)
+
+        XCTAssertFalse(account.isActive)
+        XCTAssertTrue(harness.model.canLaunchIsolatedCodex(for: account))
+
+        await harness.model.launchIsolatedCodex(for: account)
+
+        XCTAssertEqual(launcher.launchCallCount, 1)
+        XCTAssertEqual(launcher.lastAccountID, accountID)
+        XCTAssertEqual(launcher.lastPayload, refreshedPayload)
+        XCTAssertEqual(launcher.lastAppSupportDirectoryURL, harness.model.paths.appSupportDirectoryURL)
+        XCTAssertEqual(try harness.credentialStore.load(for: accountID), refreshedPayload)
+        XCTAssertTrue(harness.model.database.switchLogs.contains { $0.message.contains("独立实例启动前已在线刷新账号") })
+        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 启动独立 Codex 实例。")
+        XCTAssertFalse(harness.model.isLaunchingIsolatedInstance(for: account.id))
+    }
+
+    func testLaunchIsolatedCodexFallsBackToLocalPayloadWhenRefreshFails() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let launcher = RecordingCodexInstanceLauncher()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            instanceLauncher: launcher
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.accounts.first)
+
+        XCTAssertTrue(harness.model.canLaunchIsolatedCodex(for: account))
+
+        await harness.model.launchIsolatedCodex(for: account)
+
+        XCTAssertEqual(launcher.launchCallCount, 1)
+        XCTAssertEqual(launcher.lastPayload, cachedPayload)
+        XCTAssertTrue(harness.model.database.switchLogs.contains { $0.message.contains("独立实例启动前在线刷新账号 Cached User 失败") })
+        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 启动独立 Codex 实例。")
+        XCTAssertFalse(harness.model.isLaunchingIsolatedInstance(for: account.id))
+    }
+
     private func makeHarness(
         accountID: UUID,
         cachedPayload: CodexAuthPayload,
@@ -360,7 +494,8 @@ final class AppViewModelTests: XCTestCase {
         activeAccountID: UUID? = nil,
         extraSeeds: [AccountSeed] = [],
         quotaMonitor: any QuotaMonitoring = NoopQuotaMonitor(),
-        userNotifier: any UserNotifying = RecordingUserNotifier()
+        userNotifier: any UserNotifying = RecordingUserNotifier(),
+        instanceLauncher: any CodexInstanceLaunching = RecordingCodexInstanceLauncher()
     ) async throws -> AppViewModelHarness {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -374,6 +509,7 @@ final class AppViewModelTests: XCTestCase {
         let credentialStore = InMemoryCredentialStore()
         try credentialStore.save(cachedPayload, for: accountID)
 
+        let isPrimaryAccountActive = activeAccountID == accountID
         let account = ManagedAccount(
             id: accountID,
             codexAccountID: cachedPayload.accountIdentifier,
@@ -388,15 +524,38 @@ final class AppViewModelTests: XCTestCase {
             lastStatusCheckAt: nil,
             lastStatusMessage: nil,
             lastStatusLevel: nil,
-            isActive: false
+            isActive: isPrimaryAccountActive
         )
-        for seed in extraSeeds {
+        let normalizedSeeds = extraSeeds.map { seed in
+            AccountSeed(
+                account: ManagedAccount(
+                    id: seed.account.id,
+                    codexAccountID: seed.account.codexAccountID,
+                    displayName: seed.account.displayName,
+                    email: seed.account.email,
+                    authMode: seed.account.authMode,
+                    createdAt: seed.account.createdAt,
+                    lastUsedAt: seed.account.lastUsedAt,
+                    lastQuotaSnapshotAt: seed.account.lastQuotaSnapshotAt,
+                    lastRefreshAt: seed.account.lastRefreshAt,
+                    planType: seed.account.planType,
+                    subscriptionDetails: seed.account.subscriptionDetails,
+                    lastStatusCheckAt: seed.account.lastStatusCheckAt,
+                    lastStatusMessage: seed.account.lastStatusMessage,
+                    lastStatusLevel: seed.account.lastStatusLevel,
+                    isActive: activeAccountID == seed.account.id
+                ),
+                payload: seed.payload,
+                snapshot: seed.snapshot
+            )
+        }
+        for seed in normalizedSeeds {
             try credentialStore.save(seed.payload, for: seed.account.id)
         }
         try await databaseStore.save(AppDatabase(
             version: AppDatabase.currentVersion,
-            accounts: [account] + extraSeeds.map(\.account),
-            quotaSnapshots: Dictionary(uniqueKeysWithValues: extraSeeds.compactMap { seed in
+            accounts: [account] + normalizedSeeds.map(\.account),
+            quotaSnapshots: Dictionary(uniqueKeysWithValues: normalizedSeeds.compactMap { seed in
                 guard let snapshot = seed.snapshot else { return nil }
                 return (seed.account.id.uuidString, snapshot)
             }),
@@ -413,7 +572,8 @@ final class AppViewModelTests: XCTestCase {
             oauthClient: oauthClient,
             quotaMonitor: quotaMonitor,
             userNotifier: userNotifier,
-            runtimeInspector: runtimeInspector
+            runtimeInspector: runtimeInspector,
+            instanceLauncher: instanceLauncher
         )
 
         return AppViewModelHarness(
@@ -435,6 +595,10 @@ final class AppViewModelTests: XCTestCase {
             ),
             lastRefresh: CodexDateCoding.string(from: Date())
         )
+    }
+
+    private func makeAPIKeyPayload(_ apiKey: String) throws -> CodexAuthPayload {
+        try CodexAuthPayload(authMode: .apiKey, openAIAPIKey: apiKey).validated()
     }
 
     private func makeSignedLikePayload(
@@ -627,6 +791,29 @@ private final class MockRuntimeInspector: @unchecked Sendable, CodexRuntimeInspe
 
     func restartCodex() async throws {
         restartCallCount += 1
+    }
+}
+
+private final class RecordingCodexInstanceLauncher: CodexInstanceLaunching {
+    var launchCallCount = 0
+    var lastAccountID: UUID?
+    var lastPayload: CodexAuthPayload?
+    var lastAppSupportDirectoryURL: URL?
+
+    func launchIsolatedInstance(
+        for account: ManagedAccount,
+        payload: CodexAuthPayload,
+        appSupportDirectoryURL: URL
+    ) throws -> IsolatedCodexLaunchPaths {
+        launchCallCount += 1
+        lastAccountID = account.id
+        lastPayload = payload
+        lastAppSupportDirectoryURL = appSupportDirectoryURL
+        return IsolatedCodexLaunchPaths(
+            rootDirectoryURL: appSupportDirectoryURL.appendingPathComponent("isolated-codex-instances").appendingPathComponent(account.id.uuidString),
+            codexHomeURL: appSupportDirectoryURL.appendingPathComponent("isolated-codex-instances").appendingPathComponent(account.id.uuidString).appendingPathComponent("codex-home"),
+            userDataURL: appSupportDirectoryURL.appendingPathComponent("isolated-codex-instances").appendingPathComponent(account.id.uuidString).appendingPathComponent("user-data")
+        )
     }
 }
 

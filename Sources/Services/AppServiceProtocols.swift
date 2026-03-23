@@ -47,3 +47,17 @@ protocol CodexRuntimeInspecting: Sendable {
     func verifySwitch(after date: Date, timeoutSeconds: TimeInterval) async -> SwitchVerificationResult
     func restartCodex() async throws
 }
+
+struct IsolatedCodexLaunchPaths: Equatable, Sendable {
+    let rootDirectoryURL: URL
+    let codexHomeURL: URL
+    let userDataURL: URL
+}
+
+protocol CodexInstanceLaunching {
+    func launchIsolatedInstance(
+        for account: ManagedAccount,
+        payload: CodexAuthPayload,
+        appSupportDirectoryURL: URL
+    ) throws -> IsolatedCodexLaunchPaths
+}

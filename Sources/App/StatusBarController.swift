@@ -93,6 +93,7 @@ final class StatusBarController: NSObject {
         guard let button = statusItem.button else { return }
 
         button.image = AppIconArtwork.menuBarIcon
+        button.imageScaling = .scaleProportionallyDown
         button.imagePosition = .imageOnly
         button.toolTip = "Codex Account Switcher"
         button.target = self

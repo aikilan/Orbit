@@ -103,6 +103,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var shouldPromptRestartAfterSwitch = false
     @Published private(set) var pendingRestartPromptMessage: String?
     @Published private(set) var lowQuotaSwitchRecommendation: LowQuotaSwitchRecommendation?
+    @Published private(set) var launchingIsolatedInstanceAccountID: UUID?
 
     let paths: AppPaths
 
@@ -114,6 +115,7 @@ final class AppViewModel: ObservableObject {
     private let quotaMonitor: any QuotaMonitoring
     private let userNotifier: any UserNotifying
     private let runtimeInspector: any CodexRuntimeInspecting
+    private let instanceLauncher: any CodexInstanceLaunching
     private var browserSession: BrowserOAuthSession?
     private var browserWaitTask: Task<Void, Never>?
     private var hasLoaded = false
@@ -131,7 +133,8 @@ final class AppViewModel: ObservableObject {
         oauthClient: any OAuthClienting,
         quotaMonitor: any QuotaMonitoring,
         userNotifier: any UserNotifying,
-        runtimeInspector: any CodexRuntimeInspecting
+        runtimeInspector: any CodexRuntimeInspecting,
+        instanceLauncher: any CodexInstanceLaunching = CodexInstanceLauncher()
     ) {
         self.paths = paths
         self.databaseStore = databaseStore
@@ -142,6 +145,7 @@ final class AppViewModel: ObservableObject {
         self.quotaMonitor = quotaMonitor
         self.userNotifier = userNotifier
         self.runtimeInspector = runtimeInspector
+        self.instanceLauncher = instanceLauncher
     }
 
     static func live() -> AppViewModel {
@@ -203,6 +207,14 @@ final class AppViewModel: ObservableObject {
 
     func isVerifyingSwitch(for accountID: UUID) -> Bool {
         verifyingSwitchAccountID == accountID
+    }
+
+    func isLaunchingIsolatedInstance(for accountID: UUID) -> Bool {
+        launchingIsolatedInstanceAccountID == accountID
+    }
+
+    func canLaunchIsolatedCodex(for account: ManagedAccount) -> Bool {
+        !(account.isActive && account.authMode == .chatgpt)
     }
 
     var isSwitchInProgress: Bool {
@@ -327,6 +339,56 @@ final class AppViewModel: ObservableObject {
 
     func openCodexHomeInFinder() {
         NSWorkspace.shared.open(paths.codexHome)
+    }
+
+    func launchIsolatedCodex(for account: ManagedAccount) async {
+        guard canLaunchIsolatedCodex(for: account) else {
+            pushBanner(level: .error, message: "当前活跃的 ChatGPT 账号不能直接启动独立实例，避免触发 refresh_token_reused。")
+            return
+        }
+        guard launchingIsolatedInstanceAccountID == nil else { return }
+        launchingIsolatedInstanceAccountID = account.id
+        defer {
+            if launchingIsolatedInstanceAccountID == account.id {
+                launchingIsolatedInstanceAccountID = nil
+            }
+        }
+
+        do {
+            let cachedPayload = try latestPayloadForRefresh(for: account)
+            var payload = cachedPayload
+
+            if account.isActive,
+               let currentPayload = try authFileManager.readCurrentAuth(),
+               currentPayload.accountIdentifier == account.codexAccountID
+            {
+                payload = currentPayload
+                try credentialStore.save(currentPayload, for: account.id)
+            }
+
+            if payload.authMode == .chatgpt {
+                do {
+                    let refreshed = try await oauthClient.refreshAuth(using: payload)
+                    payload = refreshed.payload
+                    try credentialStore.save(refreshed.payload, for: account.id)
+                    let refreshedAccount = upsertAccount(identity: refreshed.identity, payload: refreshed.payload, makeActive: account.isActive)
+                    database.appendLog(level: .info, message: "独立实例启动前已在线刷新账号 \(refreshedAccount.displayName) 的凭据。")
+                    try? await persistDatabase()
+                } catch {
+                    database.appendLog(level: .warning, message: "独立实例启动前在线刷新账号 \(account.displayName) 失败，已回退当前本地凭据：\(error.localizedDescription)")
+                    try? await persistDatabase()
+                }
+            }
+
+            _ = try instanceLauncher.launchIsolatedInstance(
+                for: account,
+                payload: payload,
+                appSupportDirectoryURL: paths.appSupportDirectoryURL
+            )
+            pushBanner(level: .info, message: "已为账号 \(account.displayName) 启动独立 Codex 实例。")
+        } catch {
+            pushBanner(level: .error, message: "启动独立 Codex 实例失败：\(error.localizedDescription)")
+        }
     }
 
     func startBrowserLogin() async {
