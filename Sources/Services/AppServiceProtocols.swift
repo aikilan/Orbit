@@ -48,6 +48,11 @@ protocol CodexRuntimeInspecting: Sendable {
     func restartCodex() async throws
 }
 
+enum CodexCLILaunchMode: Equatable, Sendable {
+    case globalCurrentAuth
+    case isolatedAccount(payload: CodexAuthPayload)
+}
+
 struct IsolatedCodexLaunchPaths: Equatable, Sendable {
     let rootDirectoryURL: URL
     let codexHomeURL: URL
@@ -60,4 +65,12 @@ protocol CodexInstanceLaunching {
         payload: CodexAuthPayload,
         appSupportDirectoryURL: URL
     ) throws -> IsolatedCodexLaunchPaths
+}
+
+protocol CodexCLILaunching {
+    func launchCLI(
+        for account: ManagedAccount,
+        mode: CodexCLILaunchMode,
+        appSupportDirectoryURL: URL
+    ) throws
 }

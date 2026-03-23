@@ -104,6 +104,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var pendingRestartPromptMessage: String?
     @Published private(set) var lowQuotaSwitchRecommendation: LowQuotaSwitchRecommendation?
     @Published private(set) var launchingIsolatedInstanceAccountID: UUID?
+    @Published private(set) var launchingCLIAccountID: UUID?
 
     let paths: AppPaths
 
@@ -116,6 +117,7 @@ final class AppViewModel: ObservableObject {
     private let userNotifier: any UserNotifying
     private let runtimeInspector: any CodexRuntimeInspecting
     private let instanceLauncher: any CodexInstanceLaunching
+    private let cliLauncher: any CodexCLILaunching
     private var browserSession: BrowserOAuthSession?
     private var browserWaitTask: Task<Void, Never>?
     private var hasLoaded = false
@@ -134,7 +136,8 @@ final class AppViewModel: ObservableObject {
         quotaMonitor: any QuotaMonitoring,
         userNotifier: any UserNotifying,
         runtimeInspector: any CodexRuntimeInspecting,
-        instanceLauncher: any CodexInstanceLaunching = CodexInstanceLauncher()
+        instanceLauncher: any CodexInstanceLaunching = CodexInstanceLauncher(),
+        cliLauncher: any CodexCLILaunching = CodexCLILauncher()
     ) {
         self.paths = paths
         self.databaseStore = databaseStore
@@ -146,6 +149,7 @@ final class AppViewModel: ObservableObject {
         self.userNotifier = userNotifier
         self.runtimeInspector = runtimeInspector
         self.instanceLauncher = instanceLauncher
+        self.cliLauncher = cliLauncher
     }
 
     static func live() -> AppViewModel {
@@ -174,7 +178,8 @@ final class AppViewModel: ObservableObject {
                 oauthClient: oauthClient,
                 quotaMonitor: quotaMonitor,
                 userNotifier: userNotifier,
-                runtimeInspector: runtimeInspector
+                runtimeInspector: runtimeInspector,
+                cliLauncher: CodexCLILauncher()
             )
         } catch {
             fatalError("Failed to build AppViewModel: \(error.localizedDescription)")
@@ -211,6 +216,10 @@ final class AppViewModel: ObservableObject {
 
     func isLaunchingIsolatedInstance(for accountID: UUID) -> Bool {
         launchingIsolatedInstanceAccountID == accountID
+    }
+
+    func isLaunchingCLI(for accountID: UUID) -> Bool {
+        launchingCLIAccountID == accountID
     }
 
     func canLaunchIsolatedCodex(for account: ManagedAccount) -> Bool {
@@ -339,6 +348,54 @@ final class AppViewModel: ObservableObject {
 
     func openCodexHomeInFinder() {
         NSWorkspace.shared.open(paths.codexHome)
+    }
+
+    func openCodexCLI(for account: ManagedAccount) async {
+        guard launchingCLIAccountID == nil else { return }
+        launchingCLIAccountID = account.id
+        defer {
+            if launchingCLIAccountID == account.id {
+                launchingCLIAccountID = nil
+            }
+        }
+
+        do {
+            if account.isActive {
+                try cliLauncher.launchCLI(
+                    for: account,
+                    mode: .globalCurrentAuth,
+                    appSupportDirectoryURL: paths.appSupportDirectoryURL
+                )
+                pushBanner(level: .info, message: "已为账号 \(account.displayName) 打开 Codex CLI。")
+                return
+            }
+
+            let cachedPayload = try latestPayloadForRefresh(for: account)
+            var payload = cachedPayload
+
+            if payload.authMode == .chatgpt {
+                do {
+                    let refreshed = try await oauthClient.refreshAuth(using: payload)
+                    payload = refreshed.payload
+                    try credentialStore.save(refreshed.payload, for: account.id)
+                    let refreshedAccount = upsertAccount(identity: refreshed.identity, payload: refreshed.payload, makeActive: false)
+                    database.appendLog(level: .info, message: "打开 CLI 前已在线刷新账号 \(refreshedAccount.displayName) 的凭据。")
+                    try? await persistDatabase()
+                } catch {
+                    database.appendLog(level: .warning, message: "打开 CLI 前在线刷新账号 \(account.displayName) 失败，已回退当前本地凭据：\(error.localizedDescription)")
+                    try? await persistDatabase()
+                }
+            }
+
+            try cliLauncher.launchCLI(
+                for: account,
+                mode: .isolatedAccount(payload: payload),
+                appSupportDirectoryURL: paths.appSupportDirectoryURL
+            )
+            pushBanner(level: .info, message: "已为账号 \(account.displayName) 打开 Codex CLI。")
+        } catch {
+            pushBanner(level: .error, message: "打开 Codex CLI 失败：\(error.localizedDescription)")
+        }
     }
 
     func launchIsolatedCodex(for account: ManagedAccount) async {

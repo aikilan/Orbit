@@ -485,6 +485,159 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertFalse(harness.model.isLaunchingIsolatedInstance(for: account.id))
     }
 
+    func testOpenCodexCLIUsesGlobalAuthForActiveAccountWithoutRefresh() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let oauthClient = MockOAuthClient(refreshResult: .failure(MockError.refreshFailed))
+        let cliLauncher = RecordingCodexCLILauncher()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: oauthClient,
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            activeAccountID: accountID,
+            cliLauncher: cliLauncher
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.accounts.first)
+
+        XCTAssertTrue(account.isActive)
+
+        await harness.model.openCodexCLI(for: account)
+
+        XCTAssertEqual(oauthClient.refreshCallCount, 0)
+        XCTAssertEqual(cliLauncher.launchCallCount, 1)
+        XCTAssertEqual(cliLauncher.lastMode, .globalCurrentAuth)
+        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 打开 Codex CLI。")
+        XCTAssertFalse(harness.model.isLaunchingCLI(for: account.id))
+    }
+
+    func testOpenCodexCLIRefreshesChatGPTPayloadBeforeLaunchingIsolatedCLI() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let refreshedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_new")
+        let oauthClient = MockOAuthClient(
+            refreshResult: .success(
+                AuthLoginResult(
+                    payload: refreshedPayload,
+                    identity: AuthIdentity(
+                        accountID: "acct_cached",
+                        displayName: "Refreshed User",
+                        email: "refresh@example.com",
+                        planType: "plus"
+                    )
+                )
+            )
+        )
+        let cliLauncher = RecordingCodexCLILauncher()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: oauthClient,
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            cliLauncher: cliLauncher
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.accounts.first)
+
+        XCTAssertFalse(account.isActive)
+
+        await harness.model.openCodexCLI(for: account)
+
+        XCTAssertEqual(oauthClient.refreshCallCount, 1)
+        XCTAssertEqual(cliLauncher.launchCallCount, 1)
+        XCTAssertEqual(cliLauncher.lastMode, .isolatedAccount(payload: refreshedPayload))
+        XCTAssertEqual(try harness.credentialStore.load(for: accountID), refreshedPayload)
+        XCTAssertTrue(harness.model.database.switchLogs.contains { $0.message.contains("打开 CLI 前已在线刷新账号") })
+        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 打开 Codex CLI。")
+        XCTAssertFalse(harness.model.isLaunchingCLI(for: account.id))
+    }
+
+    func testOpenCodexCLIFallsBackToLocalPayloadWhenRefreshFails() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let oauthClient = MockOAuthClient(refreshResult: .failure(MockError.refreshFailed))
+        let cliLauncher = RecordingCodexCLILauncher()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: oauthClient,
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            cliLauncher: cliLauncher
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.accounts.first)
+
+        await harness.model.openCodexCLI(for: account)
+
+        XCTAssertEqual(oauthClient.refreshCallCount, 1)
+        XCTAssertEqual(cliLauncher.launchCallCount, 1)
+        XCTAssertEqual(cliLauncher.lastMode, .isolatedAccount(payload: cachedPayload))
+        XCTAssertTrue(harness.model.database.switchLogs.contains { $0.message.contains("打开 CLI 前在线刷新账号 Cached User 失败") })
+        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 打开 Codex CLI。")
+        XCTAssertFalse(harness.model.isLaunchingCLI(for: account.id))
+    }
+
+    func testOpenCodexCLIOpensIsolatedCLIForAPIKeyAccount() async throws {
+        let accountID = UUID()
+        let cachedPayload = try makeAPIKeyPayload("sk-test-old")
+        let oauthClient = MockOAuthClient(refreshResult: .failure(MockError.refreshFailed))
+        let cliLauncher = RecordingCodexCLILauncher()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: oauthClient,
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            cliLauncher: cliLauncher
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.accounts.first)
+
+        await harness.model.openCodexCLI(for: account)
+
+        XCTAssertEqual(oauthClient.refreshCallCount, 0)
+        XCTAssertEqual(cliLauncher.launchCallCount, 1)
+        XCTAssertEqual(cliLauncher.lastMode, .isolatedAccount(payload: cachedPayload))
+        XCTAssertEqual(harness.model.banner?.message, "已为账号 \(account.displayName) 打开 Codex CLI。")
+        XCTAssertFalse(harness.model.isLaunchingCLI(for: account.id))
+    }
+
+    func testOpenCodexCLIClearsLaunchingStateAndShowsErrorWhenLaunchFails() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let cliLauncher = RecordingCodexCLILauncher()
+        cliLauncher.error = MockError.cliLaunchFailed
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            cliLauncher: cliLauncher
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.accounts.first)
+
+        await harness.model.openCodexCLI(for: account)
+
+        XCTAssertEqual(harness.model.banner?.message, "打开 Codex CLI 失败：cli launch failed")
+        XCTAssertFalse(harness.model.isLaunchingCLI(for: account.id))
+    }
+
     private func makeHarness(
         accountID: UUID,
         cachedPayload: CodexAuthPayload,
@@ -495,7 +648,8 @@ final class AppViewModelTests: XCTestCase {
         extraSeeds: [AccountSeed] = [],
         quotaMonitor: any QuotaMonitoring = NoopQuotaMonitor(),
         userNotifier: any UserNotifying = RecordingUserNotifier(),
-        instanceLauncher: any CodexInstanceLaunching = RecordingCodexInstanceLauncher()
+        instanceLauncher: any CodexInstanceLaunching = RecordingCodexInstanceLauncher(),
+        cliLauncher: any CodexCLILaunching = RecordingCodexCLILauncher()
     ) async throws -> AppViewModelHarness {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -573,7 +727,8 @@ final class AppViewModelTests: XCTestCase {
             quotaMonitor: quotaMonitor,
             userNotifier: userNotifier,
             runtimeInspector: runtimeInspector,
-            instanceLauncher: instanceLauncher
+            instanceLauncher: instanceLauncher,
+            cliLauncher: cliLauncher
         )
 
         return AppViewModelHarness(
@@ -683,6 +838,7 @@ private final class RecordingAuthFileManager: AuthFileManaging {
 private final class MockOAuthClient: @unchecked Sendable, OAuthClienting {
     let refreshResult: Result<AuthLoginResult, Error>
     let usageResult: Result<UsageRefreshResult, Error>
+    private(set) var refreshCallCount = 0
 
     init(
         refreshResult: Result<AuthLoginResult, Error>,
@@ -713,7 +869,8 @@ private final class MockOAuthClient: @unchecked Sendable, OAuthClienting {
     }
 
     func refreshAuth(using payload: CodexAuthPayload) async throws -> AuthLoginResult {
-        try refreshResult.get()
+        refreshCallCount += 1
+        return try refreshResult.get()
     }
 
     func fetchUsageSnapshot(using payload: CodexAuthPayload) async throws -> UsageRefreshResult {
@@ -817,14 +974,39 @@ private final class RecordingCodexInstanceLauncher: CodexInstanceLaunching {
     }
 }
 
+private final class RecordingCodexCLILauncher: CodexCLILaunching {
+    var launchCallCount = 0
+    var lastAccountID: UUID?
+    var lastMode: CodexCLILaunchMode?
+    var lastAppSupportDirectoryURL: URL?
+    var error: Error?
+
+    func launchCLI(
+        for account: ManagedAccount,
+        mode: CodexCLILaunchMode,
+        appSupportDirectoryURL: URL
+    ) throws {
+        if let error {
+            throw error
+        }
+        launchCallCount += 1
+        lastAccountID = account.id
+        lastMode = mode
+        lastAppSupportDirectoryURL = appSupportDirectoryURL
+    }
+}
+
 private enum MockError: LocalizedError {
     case refreshFailed
+    case cliLaunchFailed
     case unused
 
     var errorDescription: String? {
         switch self {
         case .refreshFailed:
             return "refresh failed"
+        case .cliLaunchFailed:
+            return "cli launch failed"
         case .unused:
             return "unused"
         }

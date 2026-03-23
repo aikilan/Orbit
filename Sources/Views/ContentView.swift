@@ -388,7 +388,24 @@ private struct AccountDetailView: View {
                     Task { await model.launchIsolatedCodex(for: account) }
                 }
                 .buttonStyle(.bordered)
-                .disabled(!model.canLaunchIsolatedCodex(for: account) || model.isLaunchingIsolatedInstance(for: account.id) || model.isSwitchInProgress)
+                .disabled(
+                    !model.canLaunchIsolatedCodex(for: account)
+                        || model.isLaunchingIsolatedInstance(for: account.id)
+                        || model.isLaunchingCLI(for: account.id)
+                        || model.isSwitchInProgress
+                )
+
+                Button(model.isLaunchingCLI(for: account.id) ? "正在打开 CLI..." : "打开 Codex CLI") {
+                    Task { await model.openCodexCLI(for: account) }
+                }
+                .buttonStyle(.bordered)
+                .disabled(
+                    model.isRefreshingStatus(for: account.id)
+                        || model.isRefreshingAllStatuses
+                        || model.isLaunchingCLI(for: account.id)
+                        || model.isLaunchingIsolatedInstance(for: account.id)
+                        || model.isSwitchInProgress
+                )
 
                 if model.shouldOfferRestartCodex(for: account) {
                     Button(model.isRestartingCodex ? "正在重启 Codex..." : "重启 Codex") {
@@ -426,9 +443,12 @@ private struct AccountDetailView: View {
 
     private var isolatedLaunchHelpText: String {
         if account.isActive && account.authMode == .chatgpt {
-            return "当前活跃的 ChatGPT 账号不能再起独立实例，避免触发 refresh_token_reused。"
+            return "打开 CLI 会直接使用当前 ~/.codex；当前活跃的 ChatGPT 账号不能再起独立实例，避免触发 refresh_token_reused。"
         }
-        return "独立实例会使用该账号自己的 CODEX_HOME 和 user-data 目录启动，不会改写当前 ~/.codex。"
+        if account.isActive {
+            return "打开 CLI 会直接使用当前 ~/.codex；独立实例仍会使用独立 CODEX_HOME 和 user-data 目录启动，不会改写当前 ~/.codex。"
+        }
+        return "打开 CLI 时会为该账号使用独立 CODEX_HOME；独立实例也会使用独立 CODEX_HOME 和 user-data 目录启动，不会改写当前 ~/.codex。"
     }
 
     private var pathSection: some View {
