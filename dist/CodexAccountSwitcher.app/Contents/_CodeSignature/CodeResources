@@ -8,6 +8,28 @@
 		<data>
 		4By1RzzOs7dKhqTCAAbQyWm5Duw=
 		</data>
+		<key>Resources/CodexAccountSwitcher_CodexAccountSwitcher.bundle/Info.plist</key>
+		<data>
+		7g0CDUAAkeHXoZohLhU1fyFxbzA=
+		</data>
+		<key>Resources/CodexAccountSwitcher_CodexAccountSwitcher.bundle/en.lproj/Localizable.strings</key>
+		<dict>
+			<key>hash</key>
+			<data>
+			AkhAz5fBrvum3jA/xBlHg7rmRiA=
+			</data>
+			<key>optional</key>
+			<true/>
+		</dict>
+		<key>Resources/CodexAccountSwitcher_CodexAccountSwitcher.bundle/zh-hans.lproj/Localizable.strings</key>
+		<dict>
+			<key>hash</key>
+			<data>
+			Gz/qxGJ+vyYTzzbAI5pN0MWSldc=
+			</data>
+			<key>optional</key>
+			<true/>
+		</dict>
 	</dict>
 	<key>files2</key>
 	<dict>
@@ -17,6 +39,31 @@
 			<data>
 			vqG8Qnej5qugUaRKzUNUbLZyToZNdV9SPgZ+tnqxz80=
 			</data>
+		</dict>
+		<key>Resources/CodexAccountSwitcher_CodexAccountSwitcher.bundle/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			gKHF1DfWkXCgTGeZFxc9Gf4BGXaoHulXcZK9V4EjKtY=
+			</data>
+		</dict>
+		<key>Resources/CodexAccountSwitcher_CodexAccountSwitcher.bundle/en.lproj/Localizable.strings</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			t5b3RHpv18KqySG7ZPOI18vTr3aCU+chk1QqueCxt2A=
+			</data>
+			<key>optional</key>
+			<true/>
+		</dict>
+		<key>Resources/CodexAccountSwitcher_CodexAccountSwitcher.bundle/zh-hans.lproj/Localizable.strings</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			/cEhQIeCuaz3qR1yPrlw68eSFfN0hEugufd09lkCFwM=
+			</data>
+			<key>optional</key>
+			<true/>
 		</dict>
 	</dict>
 	<key>rules</key>

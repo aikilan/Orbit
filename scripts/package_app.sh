@@ -34,6 +34,7 @@ cd "$ROOT_DIR"
 swift build -c "$BUILD_CONFIGURATION"
 BIN_DIR="$(swift build -c "$BUILD_CONFIGURATION" --show-bin-path)"
 APP_BINARY="$BIN_DIR/$APP_NAME"
+RESOURCE_BUNDLE="$BIN_DIR/${APP_NAME}_${APP_NAME}.bundle"
 
 "$APP_BINARY" --export-icons "$ICON_EXPORT_DIR"
 
@@ -58,6 +59,7 @@ cp "$APP_BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "$INFO_PLIST_TEMPLATE" "$APP_BUNDLE/Contents/Info.plist"
 cp "$ICON_FILE" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+cp -R "$RESOURCE_BUNDLE" "$APP_BUNDLE/Contents/Resources/"
 
 plutil -replace CFBundleShortVersionString -string "$APP_VERSION" "$APP_BUNDLE/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$APP_BUILD_NUMBER" "$APP_BUNDLE/Contents/Info.plist"

@@ -21,6 +21,7 @@ enum AppLanguagePreference: String, CaseIterable, Identifiable {
 
 enum L10n {
     private static let languagePreferenceKey = "app_language_preference"
+    private static let resourceBundleName = "CodexAccountSwitcher_CodexAccountSwitcher.bundle"
     private static let englishTranslations = loadTranslations(for: "en")
     private static let simplifiedChineseTranslations = loadTranslations(for: "zh-Hans")
 
@@ -57,17 +58,68 @@ enum L10n {
         return String(format: format, locale: Locale.current, arguments: arguments)
     }
 
+    static func resourceBundle(mainBundle: Bundle = .main) -> Bundle? {
+        let bundles = [mainBundle] + Bundle.allBundles + Bundle.allFrameworks
+        let roots = bundles.flatMap { bundle in
+            [
+                bundle.resourceURL,
+                bundle.bundleURL,
+                bundle.executableURL?.deletingLastPathComponent(),
+            ]
+        }.compactMap { $0 }
+        var candidateURLs: [URL] = []
+        var seenPaths = Set<String>()
+
+        for root in roots {
+            var currentURL = root
+
+            for _ in 0..<5 {
+                let candidateURL = currentURL.appendingPathComponent(resourceBundleName)
+                let candidatePath = candidateURL.standardizedFileURL.path
+                if seenPaths.insert(candidatePath).inserted {
+                    candidateURLs.append(candidateURL)
+                }
+
+                let parentURL = currentURL.deletingLastPathComponent()
+                if parentURL.path == currentURL.path {
+                    break
+                }
+                currentURL = parentURL
+            }
+        }
+
+        for candidateURL in candidateURLs {
+            if let bundle = Bundle(url: candidateURL) {
+                return bundle
+            }
+        }
+
+        return nil
+    }
+
     private static func loadTranslations(for languageCode: String) -> [String: String] {
-        guard
-            let url = Bundle.module.url(
-                forResource: "Localizable",
-                withExtension: "strings",
-                subdirectory: "\(languageCode).lproj"
-            ),
-            let dictionary = NSDictionary(contentsOf: url) as? [String: String]
-        else {
+        guard let bundle = resourceBundle() else {
             return [:]
         }
-        return dictionary
+
+        let subdirectories = Array(
+            Set([
+                "\(languageCode).lproj",
+                "\(languageCode.lowercased()).lproj",
+            ])
+        )
+
+        for subdirectory in subdirectories {
+            if let url = bundle.url(
+                forResource: "Localizable",
+                withExtension: "strings",
+                subdirectory: subdirectory
+            ),
+            let dictionary = NSDictionary(contentsOf: url) as? [String: String] {
+                return dictionary
+            }
+        }
+
+        return [:]
     }
 }
