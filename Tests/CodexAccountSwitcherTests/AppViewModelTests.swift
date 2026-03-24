@@ -302,6 +302,57 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(harness.authFileManager.activatedPayloads.last?.openAIAPIKey, "sk-test-api-key")
     }
 
+    func testStartAPIKeyLoginKeepsExistingAccountsWhenAddingDifferentKey() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let newPayload = try makeAPIKeyPayload("sk-test-api-key-2")
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false)
+        )
+
+        await harness.model.prepare()
+        XCTAssertEqual(harness.model.accounts.count, 1)
+
+        harness.model.apiKeyInput = "sk-test-api-key-2"
+        harness.model.apiKeyDisplayName = "第二个账号"
+
+        await harness.model.startAPIKeyLogin()
+
+        XCTAssertEqual(harness.model.accounts.count, 2)
+        XCTAssertTrue(harness.model.accounts.contains(where: { $0.codexAccountID == cachedPayload.accountIdentifier }))
+        XCTAssertTrue(harness.model.accounts.contains(where: { $0.codexAccountID == newPayload.accountIdentifier }))
+        XCTAssertEqual(harness.model.activeAccount?.codexAccountID, newPayload.accountIdentifier)
+        XCTAssertEqual(harness.model.activeAccount?.displayName, "第二个账号")
+    }
+
+    func testStartAPIKeyLoginUpsertsExistingAPIKeyAccountInsteadOfDuplicating() async throws {
+        let accountID = UUID()
+        let cachedPayload = try makeAPIKeyPayload("sk-test-same-key")
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false)
+        )
+
+        await harness.model.prepare()
+        XCTAssertEqual(harness.model.accounts.count, 1)
+
+        harness.model.apiKeyInput = "sk-test-same-key"
+        harness.model.apiKeyDisplayName = "重复登录"
+
+        await harness.model.startAPIKeyLogin()
+
+        XCTAssertEqual(harness.model.accounts.count, 1)
+        XCTAssertEqual(harness.model.activeAccount?.id, accountID)
+        XCTAssertEqual(harness.model.activeAccount?.codexAccountID, cachedPayload.accountIdentifier)
+    }
+
     func testLowQuotaRecommendationNotifiesAndSupportsQuickSwitch() async throws {
         let activeAccountID = UUID()
         let candidateAccountID = UUID()
