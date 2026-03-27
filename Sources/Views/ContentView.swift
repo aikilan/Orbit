@@ -93,23 +93,6 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L10n.tr("账号"))
                 .font(.title2.bold())
-
-            Text(L10n.tr("平台"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Picker(
-                L10n.tr("平台"),
-                selection: Binding(
-                    get: { model.selectedPlatform },
-                    set: { model.selectPlatform($0) }
-                )
-            ) {
-                ForEach(model.availablePlatforms) { platform in
-                    Text(platform.displayName).tag(platform)
-                }
-            }
-            .pickerStyle(.segmented)
         }
         .padding(.horizontal, SidebarLayoutMetrics.horizontalPadding)
         .padding(.vertical, SidebarLayoutMetrics.sectionVerticalPadding)
@@ -151,7 +134,6 @@ struct ContentView: View {
                     }
             }
         }
-        .id("accounts-\(model.selectedPlatform.rawValue)")
         .listStyle(.sidebar)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -159,22 +141,19 @@ struct ContentView: View {
     private var sidebarEmptyState: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text(model.selectedPlatform == .claude ? L10n.tr("还没有 Claude 账号") : L10n.tr("还没有账号"))
-                .font(.headline)
-                .foregroundStyle(.secondary)
+                Text(L10n.tr("还没有账号"))
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
 
-                if model.selectedPlatform == .claude {
-                    Text(L10n.tr("可以导入当前 `~/.claude` 与 `~/.claude.json`，或添加 Anthropic API Key。"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(L10n.tr("先新增一个账号，支持 Codex 浏览器登录 / API Key，以及 Claude Profile / Anthropic API Key。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, SidebarLayoutMetrics.horizontalPadding)
             .padding(.vertical, 20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .id("empty-\(model.selectedPlatform.rawValue)")
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
@@ -186,14 +165,16 @@ struct ContentView: View {
                 Label(L10n.tr("新增账号"), systemImage: "plus.circle.fill")
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!model.canAddAccountsOnSelectedPlatform)
+            .disabled(!model.canAddAccounts)
 
-            Button {
-                model.openSelectedPlatformHomeInFinder()
-            } label: {
-                Label(model.selectedPlatformHomeButtonTitle, systemImage: "folder")
+            if let homeButtonTitle = model.focusedPlatformHomeButtonTitle {
+                Button {
+                    model.openFocusedPlatformHomeInFinder()
+                } label: {
+                    Label(homeButtonTitle, systemImage: "folder")
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
 
             Button {
                 Task { await model.refreshAllAccountStatuses() }
@@ -204,7 +185,7 @@ struct ContentView: View {
             .disabled(
                 model.isRefreshingAllStatuses
                     || model.accounts.isEmpty
-                    || !model.selectedPlatformCapabilities.supportsStatusRefresh
+                    || !model.focusedPlatformCapabilities.supportsStatusRefresh
             )
 
             VStack(alignment: .leading, spacing: 6) {
@@ -227,17 +208,19 @@ struct ContentView: View {
                 .labelsHidden()
             }
 
-            if !model.selectedPlatformUnsupportedMessage.isEmpty {
-                Text(model.selectedPlatformUnsupportedMessage)
+            if !model.focusedPlatformUnsupportedMessage.isEmpty {
+                Text(model.focusedPlatformUnsupportedMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text(model.selectedPlatformHomePath)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
+            if let homePath = model.focusedPlatformHomePath {
+                Text(homePath)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
         }
         .padding(SidebarLayoutMetrics.footerPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -289,12 +272,10 @@ struct ContentView: View {
             .id(account.id)
         } else {
             ContentUnavailableView(
-                model.selectedPlatform == .claude ? L10n.tr("还没有 Claude 账号") : L10n.tr("还没有账号"),
+                L10n.tr("还没有账号"),
                 systemImage: "person.2.slash",
                 description: Text(
-                    model.selectedPlatform == .claude
-                        ? L10n.tr("先新增一个 Claude 账号，支持导入本地 Profile 或保存 Anthropic API Key。")
-                        : L10n.tr("先新增一个账号，或者导入当前 ~/.codex/auth.json 对应的账号。")
+                    L10n.tr("先新增一个账号，支持 Codex 浏览器登录 / API Key，以及 Claude Profile / Anthropic API Key。")
                 )
             )
         }
@@ -312,6 +293,19 @@ struct ContentView: View {
             }
             return values.joined(separator: "\n")
         }
+    }
+}
+
+private struct AccountPlatformBadge: View {
+    let platform: PlatformKind
+
+    var body: some View {
+        Text(platform.displayName)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.secondary.opacity(0.12), in: Capsule())
     }
 }
 
@@ -333,6 +327,7 @@ private struct AccountListRow: View {
                         .padding(.vertical, 2)
                         .background(Color.green.opacity(0.12), in: Capsule())
                 }
+                AccountPlatformBadge(platform: account.platform)
             }
 
             Text(accountSubtitle)
@@ -953,10 +948,14 @@ private struct MenuBarAccountRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(account.displayName)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(account.displayName)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    AccountPlatformBadge(platform: account.platform)
+                }
 
                 if let summaryText {
                     Text(summaryText)
@@ -1087,8 +1086,8 @@ struct MenuBarContentView: View {
 
             Divider()
 
-            if !model.selectedPlatformUnsupportedMessage.isEmpty {
-                Text(model.selectedPlatformUnsupportedMessage)
+            if !model.focusedPlatformUnsupportedMessage.isEmpty {
+                Text(model.focusedPlatformUnsupportedMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1131,7 +1130,7 @@ struct MenuBarContentView: View {
     }
 
     private var shouldShowStandaloneRestartAction: Bool {
-        model.selectedPlatform == .codex && model.canQuickRestartCodex && model.restartPromptMessage == nil
+        model.focusedPlatform == .codex && model.canQuickRestartCodex && model.restartPromptMessage == nil
     }
 
     private func switchButtonTitle(for account: ManagedAccount) -> String {
@@ -1150,7 +1149,7 @@ struct MenuBarContentView: View {
                 .font(.caption.bold())
                 .foregroundStyle(.secondary)
 
-            if model.selectedPlatform == .codex, let recommendation = model.lowQuotaSwitchRecommendation {
+            if model.focusedPlatform == .codex, let recommendation = model.lowQuotaSwitchRecommendation {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(recommendation.promptTitle)
                         .font(.callout.weight(.medium))
@@ -1174,7 +1173,7 @@ struct MenuBarContentView: View {
                 .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
 
-            if model.selectedPlatform == .codex, let promptMessage = model.restartPromptMessage {
+            if model.focusedPlatform == .codex, let promptMessage = model.restartPromptMessage {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(L10n.tr("切换完成后，是否现在重启 Codex？"))
                         .font(.callout.weight(.medium))
@@ -1207,7 +1206,7 @@ struct MenuBarContentView: View {
                     quickActionButton(L10n.tr("新增账号"), systemImage: "plus.circle") {
                         onOpenAddAccount()
                     }
-                    .disabled(!model.canAddAccountsOnSelectedPlatform)
+                    .disabled(!model.canAddAccounts)
                 }
 
                 HStack(spacing: 10) {
@@ -1216,7 +1215,7 @@ struct MenuBarContentView: View {
                         systemImage: "arrow.clockwise",
                         isDisabled: model.isRefreshingAllStatuses
                             || model.accounts.isEmpty
-                            || !model.selectedPlatformCapabilities.supportsStatusRefresh
+                            || !model.focusedPlatformCapabilities.supportsStatusRefresh
                     ) {
                         Task { await model.refreshAllAccountStatuses() }
                     }

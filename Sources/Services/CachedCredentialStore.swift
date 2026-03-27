@@ -60,7 +60,7 @@ struct PlaintextCredentialCacheStore {
         let directoryURL = cacheFileURL.deletingLastPathComponent()
         try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
 
-        let encodedCredentials = try Dictionary(
+        let encodedCredentials = Dictionary(
             uniqueKeysWithValues: credentialsByAccountID.map { key, value in
                 (key.uuidString, value)
             }

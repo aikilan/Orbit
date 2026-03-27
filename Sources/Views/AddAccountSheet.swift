@@ -28,9 +28,7 @@ struct AddAccountSheet: View {
                 model.addAccountStatus = model.selectedPlatformAddAccountMessage
             }
             .onAppear {
-                model.addAccountPlatform = model.selectedPlatform
-                model.addAccountMode = AddAccountMode.modes(for: model.selectedPlatform).first ?? .browser
-                model.addAccountStatus = model.selectedPlatformAddAccountMessage
+                model.prepareAddAccountSheet()
             }
 
             Text(model.addAccountStatus)

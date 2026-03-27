@@ -253,10 +253,11 @@ final class AppViewModelTests: XCTestCase {
 
         XCTAssertEqual(model.database.activeAccountID, claudeAccountID)
         XCTAssertEqual(model.database.accounts.count, 2)
-        XCTAssertEqual(model.accounts.count, 1)
-        let importedAccount = try XCTUnwrap(model.accounts.first)
+        XCTAssertEqual(model.accounts.count, 2)
+        let importedAccount = try XCTUnwrap(model.database.accounts.first(where: { $0.codexAccountID == "acct_imported" }))
         XCTAssertEqual(importedAccount.codexAccountID, "acct_imported")
-        XCTAssertEqual(model.selectedAccountID, importedAccount.id)
+        XCTAssertEqual(model.selectedAccountID, claudeAccountID)
+        XCTAssertEqual(model.selectedAccount?.id, claudeAccountID)
         XCTAssertTrue(
             model.database.switchLogs.contains {
                 $0.message == L10n.tr(
@@ -350,7 +351,9 @@ final class AppViewModelTests: XCTestCase {
 
         await model.prepare()
         XCTAssertEqual(model.database.activeAccountID, claudeAccountID)
-        XCTAssertEqual(model.selectedAccountID, selectedCodexAccountID)
+        XCTAssertEqual(model.selectedAccountID, claudeAccountID)
+
+        model.selectedAccountID = selectedCodexAccountID
 
         authFileManager.currentAuth = makeSignedLikePayload(
             accountID: "acct_reconciled",
@@ -549,7 +552,62 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(harness.model.activeAccount?.codexAccountID, cachedPayload.accountIdentifier)
     }
 
-    func testSelectingClaudePlatformShowsSupportedState() async throws {
+    func testAccountsListCombinesPlatformsAndFocusedPlatformStateFollowsSelection() async throws {
+        let accountID = UUID()
+        let claudeAccountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            activeAccountID: accountID,
+            extraSeeds: [
+                AccountSeed(
+                    account: ManagedAccount(
+                        id: claudeAccountID,
+                        platform: .claude,
+                        codexAccountID: "claude-profile",
+                        displayName: "Claude Profile",
+                        email: nil,
+                        authMode: .claudeProfile,
+                        createdAt: Date(),
+                        lastUsedAt: nil,
+                        lastQuotaSnapshotAt: nil,
+                        lastRefreshAt: nil,
+                        planType: nil,
+                        lastStatusCheckAt: nil,
+                        lastStatusMessage: nil,
+                        lastStatusLevel: nil,
+                        isActive: false
+                    ),
+                    payload: .claudeProfile(ClaudeProfileSnapshotRef(snapshotID: "snapshot_focus")),
+                    snapshot: nil
+                )
+            ]
+        )
+
+        await harness.model.prepare()
+        XCTAssertEqual(harness.model.accounts.count, 2)
+        XCTAssertEqual(harness.model.focusedPlatform, .codex)
+
+        harness.model.selectedAccountID = claudeAccountID
+        harness.model.prepareAddAccountSheet()
+
+        XCTAssertEqual(harness.model.focusedPlatform, .claude)
+        XCTAssertTrue(harness.model.canAddAccounts)
+        XCTAssertEqual(harness.model.focusedPlatformHomeButtonTitle, L10n.tr("打开 ~/.claude"))
+        XCTAssertEqual(harness.model.addAccountPlatform, .claude)
+        XCTAssertEqual(harness.model.availableAddAccountModes, [.claudeProfile, .anthropicAPIKey])
+        XCTAssertEqual(
+            harness.model.focusedPlatformUnsupportedMessage,
+            L10n.tr("Claude 当前支持本地 Profile 导入、Anthropic API Key 管理和 Claude CLI 启动；不支持 claude.ai OAuth 切换。")
+        )
+    }
+
+    func testPrepareAddAccountSheetDefaultsToActivePlatformAndFallsBackToCodex() async throws {
         let accountID = UUID()
         let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
 
@@ -558,23 +616,20 @@ final class AppViewModelTests: XCTestCase {
             cachedPayload: cachedPayload,
             authFileManager: RecordingAuthFileManager(),
             oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
-            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false)
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            activeAccountID: accountID
         )
 
         await harness.model.prepare()
-        XCTAssertEqual(harness.model.accounts.count, 1)
 
-        harness.model.selectPlatform(.claude)
+        harness.model.selectedAccountID = nil
+        harness.model.prepareAddAccountSheet()
+        XCTAssertEqual(harness.model.addAccountPlatform, .codex)
 
-        XCTAssertEqual(harness.model.accounts.count, 0)
-        XCTAssertNil(harness.model.selectedAccount)
-        XCTAssertTrue(harness.model.canAddAccountsOnSelectedPlatform)
-        XCTAssertEqual(harness.model.selectedPlatformHomeButtonTitle, L10n.tr("打开 ~/.claude"))
-        XCTAssertEqual(harness.model.availableAddAccountModes, [.claudeProfile, .anthropicAPIKey])
-        XCTAssertEqual(
-            harness.model.selectedPlatformUnsupportedMessage,
-            L10n.tr("Claude 当前支持本地 Profile 导入、Anthropic API Key 管理和 Claude CLI 启动；不支持 claude.ai OAuth 切换。")
-        )
+        await harness.model.deleteAccount(accountID, clearCurrentAuth: false)
+
+        harness.model.prepareAddAccountSheet()
+        XCTAssertEqual(harness.model.addAccountPlatform, .codex)
     }
 
     func testClaudeAPIKeyLoginDoesNotWriteCodexAuth() async throws {
@@ -591,7 +646,6 @@ final class AppViewModelTests: XCTestCase {
         )
 
         await harness.model.prepare()
-        harness.model.selectPlatform(.claude)
         harness.model.addAccountPlatform = .claude
         harness.model.addAccountMode = .anthropicAPIKey
         harness.model.apiKeyInput = "sk-ant-test-claude"
@@ -600,10 +654,11 @@ final class AppViewModelTests: XCTestCase {
         await harness.model.startAPIKeyLogin()
 
         XCTAssertTrue(authFileManager.activatedPayloads.isEmpty)
-        XCTAssertEqual(harness.model.accounts.count, 1)
+        XCTAssertEqual(harness.model.accounts.count, 2)
         XCTAssertEqual(harness.model.activeAccount?.platform, .claude)
         XCTAssertEqual(harness.model.activeAccount?.authMode, .anthropicAPIKey)
         XCTAssertEqual(harness.model.activeAccount?.displayName, "Claude API")
+        XCTAssertEqual(harness.model.selectedAccount?.displayName, "Claude API")
         XCTAssertEqual(
             harness.model.banner?.message,
             L10n.tr("已切换到账号 %@。", "Claude API")
@@ -649,7 +704,6 @@ final class AppViewModelTests: XCTestCase {
         )
 
         await harness.model.prepare()
-        harness.model.selectPlatform(.claude)
         let account = try XCTUnwrap(harness.model.database.account(id: claudeAccountID))
 
         await harness.model.openCodexCLI(for: account, workingDirectoryURL: makeWorkingDirectoryURL("claude-cli"))
@@ -660,6 +714,54 @@ final class AppViewModelTests: XCTestCase {
             harness.model.banner?.message,
             L10n.tr("已为账号 %@ 打开 Claude CLI。", "Claude API")
         )
+    }
+
+    func testRefreshAllAccountStatusesRefreshesUnifiedQueue() async throws {
+        let accountID = UUID()
+        let claudeAccountID = UUID()
+        let apiKeyPayload = try makeAPIKeyPayload("sk-test-unified-refresh")
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: apiKeyPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            extraSeeds: [
+                AccountSeed(
+                    account: ManagedAccount(
+                        id: claudeAccountID,
+                        platform: .claude,
+                        codexAccountID: "claude-profile-refresh",
+                        displayName: "Claude Profile",
+                        email: nil,
+                        authMode: .claudeProfile,
+                        createdAt: Date(),
+                        lastUsedAt: nil,
+                        lastQuotaSnapshotAt: nil,
+                        lastRefreshAt: nil,
+                        planType: nil,
+                        lastStatusCheckAt: nil,
+                        lastStatusMessage: nil,
+                        lastStatusLevel: nil,
+                        isActive: false
+                    ),
+                    payload: .claudeProfile(ClaudeProfileSnapshotRef(snapshotID: "snapshot_refresh_all")),
+                    snapshot: nil
+                )
+            ]
+        )
+
+        await harness.model.prepare()
+        await harness.model.refreshAllAccountStatuses()
+
+        let codexAccount = try XCTUnwrap(harness.model.database.account(id: accountID))
+        let claudeAccount = try XCTUnwrap(harness.model.database.account(id: claudeAccountID))
+        XCTAssertEqual(harness.model.banner?.message, L10n.tr("已完成 %d 个账号的状态与额度更新。", 2))
+        XCTAssertNotNil(codexAccount.lastStatusCheckAt)
+        XCTAssertNotNil(claudeAccount.lastStatusCheckAt)
+        XCTAssertEqual(codexAccount.lastStatusLevel, .info)
+        XCTAssertEqual(claudeAccount.lastStatusLevel, .info)
     }
 
     func testLowQuotaRecommendationNotifiesAndSupportsQuickSwitch() async throws {
