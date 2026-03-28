@@ -177,6 +177,13 @@ extension ManagedAccount {
         allowedCLITargets.contains(.claude)
     }
 
+    var supportsResponsesAPI: Bool {
+        ProviderCatalog.supportsResponsesAPI(
+            presetID: providerPresetID,
+            baseURL: resolvedProviderBaseURL
+        )
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id
         case platform

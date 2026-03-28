@@ -6,6 +6,7 @@ enum CLIEnvironmentResolverError: LocalizedError, Equatable {
     case missingClaudeCredential
     case invalidProviderConfiguration
     case codexCLINotSupported
+    case providerResponsesAPINotSupported
 
     var errorDescription: String? {
         switch self {
@@ -19,6 +20,8 @@ enum CLIEnvironmentResolverError: LocalizedError, Equatable {
             return L10n.tr("当前账号的 Provider 配置不完整。")
         case .codexCLINotSupported:
             return L10n.tr("当前账号不支持打开 Codex CLI。")
+        case .providerResponsesAPINotSupported:
+            return L10n.tr("当前 Provider 不支持 OpenAI Responses API，无法用于启动 Codex CLI 或 Claude Code。")
         }
     }
 }
@@ -45,6 +48,7 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
         appPaths: AppPaths,
         authPayload: CodexAuthPayload?,
         providerAPIKeyCredential: ProviderAPIKeyCredential?,
+        openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging,
         claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging
     ) async throws -> ResolvedCodexCLILaunchContext {
         switch account.providerRule {
@@ -85,6 +89,27 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 throw CLIEnvironmentResolverError.missingProviderCredential
             }
             let provider = try resolvedProviderConfig(for: account)
+            let resolvedProvider: (baseURL: String, apiKeyEnvName: String, apiKey: String)
+            if account.supportsResponsesAPI {
+                resolvedProvider = (
+                    baseURL: provider.baseURL,
+                    apiKeyEnvName: provider.apiKeyEnvName,
+                    apiKey: credential.apiKey
+                )
+            } else {
+                let bridge = try await openAICompatibleProviderCodexBridgeManager.prepareBridge(
+                    accountID: account.id,
+                    baseURL: provider.baseURL,
+                    apiKeyEnvName: provider.apiKeyEnvName,
+                    apiKey: credential.apiKey,
+                    model: account.resolvedDefaultModel
+                )
+                resolvedProvider = (
+                    baseURL: bridge.baseURL,
+                    apiKeyEnvName: bridge.apiKeyEnvName,
+                    apiKey: bridge.apiKey
+                )
+            }
             let codexHomeURL = isolatedCodexHomeURL(
                 for: account.id,
                 target: .codex,
@@ -101,10 +126,10 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                     modelProvider: provider.identifier,
                     providerIdentifier: provider.identifier,
                     providerDisplayName: provider.displayName,
-                    baseURL: provider.baseURL,
-                    envKey: provider.apiKeyEnvName
+                    baseURL: resolvedProvider.baseURL,
+                    envKey: resolvedProvider.apiKeyEnvName
                 ),
-                environmentVariables: [provider.apiKeyEnvName: credential.apiKey],
+                environmentVariables: [resolvedProvider.apiKeyEnvName: resolvedProvider.apiKey],
                 arguments: []
             )
         case .claudeCompatible:
@@ -247,7 +272,8 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 source: .provider(
                     baseURL: provider.baseURL,
                     apiKeyEnvName: provider.apiKeyEnvName,
-                    apiKey: providerCredential.apiKey
+                    apiKey: providerCredential.apiKey,
+                    supportsResponsesAPI: account.supportsResponsesAPI
                 ),
                 model: account.resolvedDefaultModel
             )

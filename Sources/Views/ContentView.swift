@@ -730,6 +730,9 @@ private struct AccountDetailView: View {
     }
 
     private var cliLaunchHelpText: String {
+        if account.providerRule == .openAICompatible, !account.supportsResponsesAPI {
+            return L10n.tr("打开 CLI 会先通过本地桥接把 OpenAI Responses API 转成 chat/completions，再按当前账号配置启动。")
+        }
         switch selectedCLITarget {
         case .claude:
             switch account.providerRule {

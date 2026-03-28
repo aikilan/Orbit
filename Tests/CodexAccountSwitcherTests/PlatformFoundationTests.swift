@@ -3,6 +3,12 @@ import XCTest
 @testable import CodexAccountSwitcher
 
 final class PlatformFoundationTests: XCTestCase {
+    func testOpenAICompatiblePresetListIncludesDeepSeek() {
+        XCTAssertTrue(
+            ProviderCatalog.presets(for: .openAICompatible).contains(where: { $0.id == "deepseek" })
+        )
+    }
+
     func testLegacyDatabaseDecodesAccountsAsCodexAndBumpsVersion() throws {
         let accountID = UUID()
         let json = """

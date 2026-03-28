@@ -135,6 +135,7 @@ final class AppViewModel: ObservableObject {
     private let claudeCLILauncher: any ClaudeCLILaunching
     private let claudePatchedRuntimeManager: any ClaudePatchedRuntimeManaging
     private let codexOAuthClaudeBridgeManager: any CodexOAuthClaudeBridgeManaging
+    private let openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging
     private let claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging
     private let runtimes: [PlatformKind: any PlatformRuntime]
     private let bannerAutoDismissDuration: Duration
@@ -165,6 +166,7 @@ final class AppViewModel: ObservableObject {
         claudeCLILauncher: any ClaudeCLILaunching = ClaudeCLILauncher(),
         claudePatchedRuntimeManager: any ClaudePatchedRuntimeManaging = ClaudePatchedRuntimeManager(),
         codexOAuthClaudeBridgeManager: any CodexOAuthClaudeBridgeManaging = CodexOAuthClaudeBridgeManager(),
+        openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging = OpenAICompatibleProviderCodexBridgeManager(),
         claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging = ClaudeProviderCodexBridgeManager(),
         platformRuntimes: [any PlatformRuntime] = [CodexPlatformRuntime(), ClaudePlatformRuntime()],
         bannerAutoDismissDuration: Duration = .seconds(10)
@@ -186,6 +188,7 @@ final class AppViewModel: ObservableObject {
         self.claudeCLILauncher = claudeCLILauncher
         self.claudePatchedRuntimeManager = claudePatchedRuntimeManager
         self.codexOAuthClaudeBridgeManager = codexOAuthClaudeBridgeManager
+        self.openAICompatibleProviderCodexBridgeManager = openAICompatibleProviderCodexBridgeManager
         self.claudeProviderCodexBridgeManager = claudeProviderCodexBridgeManager
         self.runtimes = Dictionary(uniqueKeysWithValues: platformRuntimes.map { ($0.platform, $0) })
         self.bannerAutoDismissDuration = bannerAutoDismissDuration
@@ -227,6 +230,7 @@ final class AppViewModel: ObservableObject {
                 claudeCLILauncher: ClaudeCLILauncher(),
                 claudePatchedRuntimeManager: ClaudePatchedRuntimeManager(),
                 codexOAuthClaudeBridgeManager: CodexOAuthClaudeBridgeManager(),
+                openAICompatibleProviderCodexBridgeManager: OpenAICompatibleProviderCodexBridgeManager(),
                 claudeProviderCodexBridgeManager: ClaudeProviderCodexBridgeManager(),
                 platformRuntimes: [CodexPlatformRuntime(), ClaudePlatformRuntime()]
             )
@@ -289,7 +293,16 @@ final class AppViewModel: ObservableObject {
     }
 
     var selectedAddAccountMessage: String {
-        addAccountMessage(for: addAccountMode)
+        if addAccountMode == .providerAPIKey,
+           addAccountProviderRule == .openAICompatible,
+           !ProviderCatalog.supportsResponsesAPI(
+               presetID: addAccountProviderPresetID,
+               baseURL: addAccountProviderBaseURL
+           )
+        {
+            return L10n.tr("当前 Provider 会通过本地桥接把 OpenAI Responses API 转成 chat/completions 后再启动。")
+        }
+        return addAccountMessage(for: addAccountMode)
     }
 
     var availableAddAccountModes: [AddAccountMode] {
@@ -1462,6 +1475,7 @@ final class AppViewModel: ObservableObject {
             appPaths: paths,
             authPayload: payload,
             providerAPIKeyCredential: providerCredential,
+            openAICompatibleProviderCodexBridgeManager: openAICompatibleProviderCodexBridgeManager,
             claudeProviderCodexBridgeManager: claudeProviderCodexBridgeManager
         )
     }

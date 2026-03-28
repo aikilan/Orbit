@@ -47,7 +47,7 @@ protocol ClaudePatchedRuntimeManaging: Sendable {
 
 enum OpenAICompatibleClaudeBridgeSource: Equatable, Sendable {
     case codexAuthPayload(CodexAuthPayload)
-    case provider(baseURL: String, apiKeyEnvName: String, apiKey: String)
+    case provider(baseURL: String, apiKeyEnvName: String, apiKey: String, supportsResponsesAPI: Bool)
 }
 
 struct PreparedCodexOAuthClaudeBridge: Equatable, Sendable {
@@ -70,6 +70,12 @@ struct PreparedClaudeProviderCodexBridge: Equatable, Sendable {
     let apiKey: String
 }
 
+struct PreparedOpenAICompatibleProviderCodexBridge: Equatable, Sendable {
+    let baseURL: String
+    let apiKeyEnvName: String
+    let apiKey: String
+}
+
 protocol ClaudeProviderCodexBridgeManaging: Sendable {
     func prepareBridge(
         accountID: UUID,
@@ -78,6 +84,16 @@ protocol ClaudeProviderCodexBridgeManaging: Sendable {
         apiKey: String,
         model: String
     ) async throws -> PreparedClaudeProviderCodexBridge
+}
+
+protocol OpenAICompatibleProviderCodexBridgeManaging: Sendable {
+    func prepareBridge(
+        accountID: UUID,
+        baseURL: String,
+        apiKeyEnvName: String,
+        apiKey: String,
+        model: String
+    ) async throws -> PreparedOpenAICompatibleProviderCodexBridge
 }
 
 protocol QuotaMonitoring: AnyObject {
@@ -111,6 +127,7 @@ protocol CLIEnvironmentResolving: Sendable {
         appPaths: AppPaths,
         authPayload: CodexAuthPayload?,
         providerAPIKeyCredential: ProviderAPIKeyCredential?,
+        openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging,
         claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging
     ) async throws -> ResolvedCodexCLILaunchContext
 

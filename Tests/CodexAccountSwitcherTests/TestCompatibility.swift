@@ -172,6 +172,22 @@ private struct NoopCodexOAuthClaudeBridgeManager: CodexOAuthClaudeBridgeManaging
     }
 }
 
+private struct NoopOpenAICompatibleProviderCodexBridgeManager: OpenAICompatibleProviderCodexBridgeManaging {
+    func prepareBridge(
+        accountID: UUID,
+        baseURL: String,
+        apiKeyEnvName: String,
+        apiKey: String,
+        model: String
+    ) async throws -> PreparedOpenAICompatibleProviderCodexBridge {
+        PreparedOpenAICompatibleProviderCodexBridge(
+            baseURL: "http://127.0.0.1:18082",
+            apiKeyEnvName: "OPENAI_API_KEY",
+            apiKey: "openai-compatible-provider-bridge"
+        )
+    }
+}
+
 private struct NoopClaudeProviderCodexBridgeManager: ClaudeProviderCodexBridgeManaging {
     func prepareBridge(
         accountID: UUID,
@@ -205,6 +221,7 @@ extension AppViewModel {
         claudeCLILauncher: any ClaudeCLILaunching = NoopClaudeCLILauncher(),
         claudePatchedRuntimeManager: any ClaudePatchedRuntimeManaging = NoopClaudePatchedRuntimeManager(),
         codexOAuthClaudeBridgeManager: any CodexOAuthClaudeBridgeManaging = NoopCodexOAuthClaudeBridgeManager(),
+        openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging = NoopOpenAICompatibleProviderCodexBridgeManager(),
         claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging = NoopClaudeProviderCodexBridgeManager(),
         bannerAutoDismissDuration: Duration = .seconds(10)
     ) {
@@ -226,6 +243,7 @@ extension AppViewModel {
             claudeCLILauncher: claudeCLILauncher,
             claudePatchedRuntimeManager: claudePatchedRuntimeManager,
             codexOAuthClaudeBridgeManager: codexOAuthClaudeBridgeManager,
+            openAICompatibleProviderCodexBridgeManager: openAICompatibleProviderCodexBridgeManager,
             claudeProviderCodexBridgeManager: claudeProviderCodexBridgeManager,
             bannerAutoDismissDuration: bannerAutoDismissDuration
         )

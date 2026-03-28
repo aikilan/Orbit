@@ -87,12 +87,12 @@ private func defaultCodexOAuthClaudeBridgeUpstreamRequest(
     source: OpenAICompatibleClaudeBridgeSource,
     body: Data
 ) async throws -> CodexOAuthClaudeBridgeUpstreamResponse {
-    let url: URL
-    let authorizationValue: String
-    let accountID: String?
-
     switch source {
     case let .codexAuthPayload(payload):
+        let url: URL
+        let authorizationValue: String
+        let accountID: String?
+
         switch payload.authMode {
         case .chatgpt:
             url = URL(string: "https://chatgpt.com/backend-api/codex/responses")!
@@ -108,29 +108,62 @@ private func defaultCodexOAuthClaudeBridgeUpstreamRequest(
         case .claudeProfile, .anthropicAPIKey, .providerAPIKey:
             throw CodexOAuthClaudeBridgeManagerError.unsupportedAuthMode
         }
-    case let .provider(baseURL, _, apiKey):
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.setValue(authorizationValue, forHTTPHeaderField: "Authorization")
+        if let accountID, !accountID.isEmpty {
+            request.setValue(accountID, forHTTPHeaderField: "ChatGPT-Account-Id")
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 500
+        return CodexOAuthClaudeBridgeUpstreamResponse(statusCode: statusCode, body: data)
+    case let .provider(baseURL, _, apiKey, supportsResponsesAPI):
         let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard !trimmedBaseURL.isEmpty, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CodexOAuthClaudeBridgeManagerError.unsupportedAuthMode
         }
-        url = URL(string: "\(trimmedBaseURL)/responses")!
-        authorizationValue = "Bearer \(apiKey)"
-        accountID = nil
-    }
 
-    var request = URLRequest(url: url)
-    request.httpMethod = "POST"
-    request.httpBody = body
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-    request.setValue(authorizationValue, forHTTPHeaderField: "Authorization")
-    if let accountID, !accountID.isEmpty {
-        request.setValue(accountID, forHTTPHeaderField: "ChatGPT-Account-Id")
-    }
+        if supportsResponsesAPI {
+            var request = URLRequest(url: URL(string: "\(trimmedBaseURL)/responses")!)
+            request.httpMethod = "POST"
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
-    let (data, response) = try await URLSession.shared.data(for: request)
-    let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 500
-    return CodexOAuthClaudeBridgeUpstreamResponse(statusCode: statusCode, body: data)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 500
+            return CodexOAuthClaudeBridgeUpstreamResponse(statusCode: statusCode, body: data)
+        }
+
+        let requestObject = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+        let fallbackModel = CodexOAuthClaudeBridgeServer.trimmedString(requestObject?["model"]) ?? "gpt-5.4"
+        let chatRequest = try ResponsesChatCompletionsBridge.makeChatCompletionsRequestData(
+            from: body,
+            fallbackModel: fallbackModel
+        )
+        var request = URLRequest(url: URL(string: "\(trimmedBaseURL)/chat/completions")!)
+        request.httpMethod = "POST"
+        request.httpBody = chatRequest
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 500
+        if !(200..<300).contains(statusCode) {
+            return CodexOAuthClaudeBridgeUpstreamResponse(statusCode: statusCode, body: data)
+        }
+        let bridgedData = try ResponsesChatCompletionsBridge.makeResponsesResponseData(
+            from: data,
+            fallbackModel: fallbackModel
+        )
+        return CodexOAuthClaudeBridgeUpstreamResponse(statusCode: statusCode, body: bridgedData)
+    }
 }
 
 enum CodexOAuthClaudeBridgeManagerError: LocalizedError, Equatable {

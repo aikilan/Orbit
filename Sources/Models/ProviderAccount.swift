@@ -38,6 +38,7 @@ struct ProviderPreset: Identifiable, Equatable, Sendable {
     let baseURL: String
     let apiKeyEnvName: String
     let defaultModel: String
+    let supportsResponsesAPI: Bool
     let isCustom: Bool
 
     init(
@@ -47,6 +48,7 @@ struct ProviderPreset: Identifiable, Equatable, Sendable {
         baseURL: String,
         apiKeyEnvName: String,
         defaultModel: String,
+        supportsResponsesAPI: Bool = true,
         isCustom: Bool = false
     ) {
         self.id = id
@@ -55,6 +57,7 @@ struct ProviderPreset: Identifiable, Equatable, Sendable {
         self.baseURL = baseURL
         self.apiKeyEnvName = apiKeyEnvName
         self.defaultModel = defaultModel
+        self.supportsResponsesAPI = supportsResponsesAPI
         self.isCustom = isCustom
     }
 }
@@ -85,7 +88,8 @@ enum ProviderCatalog {
             rule: .openAICompatible,
             baseURL: "https://api.deepseek.com/v1",
             apiKeyEnvName: "DEEPSEEK_API_KEY",
-            defaultModel: "deepseek-chat"
+            defaultModel: "deepseek-chat",
+            supportsResponsesAPI: false
         ),
         ProviderPreset(
             id: "moonshot",
@@ -143,6 +147,21 @@ enum ProviderCatalog {
                 isCustom: true
             ),
         ]
+    }
+
+    static func supportsResponsesAPI(presetID: String?, baseURL: String?) -> Bool {
+        if let presetID, let preset = preset(id: presetID), !preset.supportsResponsesAPI {
+            return false
+        }
+
+        let trimmedBaseURL = baseURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmedBaseURL.isEmpty else {
+            return true
+        }
+
+        let host = URL(string: trimmedBaseURL)?.host?.lowercased()
+            ?? URL(string: "https://\(trimmedBaseURL)")?.host?.lowercased()
+        return host != "api.deepseek.com"
     }
 
     static func providerDisplayName(

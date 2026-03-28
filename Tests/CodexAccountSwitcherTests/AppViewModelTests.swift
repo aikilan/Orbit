@@ -676,6 +676,35 @@ final class AppViewModelTests: XCTestCase {
         )
     }
 
+    func testOpenAICompatibleProviderLoginAllowsDeepSeekBaseURL() async throws {
+        let accountID = UUID()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: makePayload(accountID: "acct_cached", refreshToken: "refresh_old"),
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false)
+        )
+
+        await harness.model.prepare()
+        harness.model.addAccountMode = .providerAPIKey
+        harness.model.addAccountProviderRule = .openAICompatible
+        harness.model.applyProviderPreset(ProviderCatalog.preset(id: ProviderCatalog.customPresetID))
+        harness.model.addAccountProviderDisplayName = "DeepSeek"
+        harness.model.addAccountProviderBaseURL = "https://api.deepseek.com/v1"
+        harness.model.addAccountProviderAPIKeyEnvName = "DEEPSEEK_API_KEY"
+        harness.model.addAccountDefaultModel = "deepseek-reasoner"
+        harness.model.apiKeyInput = "sk-deepseek-test"
+
+        await harness.model.startAPIKeyLogin()
+
+        XCTAssertNil(harness.model.addAccountError)
+        XCTAssertEqual(harness.model.accounts.count, 2)
+        XCTAssertEqual(harness.model.activeAccount?.providerPresetID, ProviderCatalog.customPresetID)
+        XCTAssertEqual(harness.model.activeAccount?.providerBaseURL, "https://api.deepseek.com/v1")
+    }
+
     func testClaudeCompatibleProviderAccountOpensCodexCLIThroughBridge() async throws {
         let accountID = UUID()
         let providerAccountID = UUID()
@@ -783,7 +812,8 @@ final class AppViewModelTests: XCTestCase {
             .provider(
                 baseURL: "https://openrouter.ai/api/v1",
                 apiKeyEnvName: "OPENROUTER_API_KEY",
-                apiKey: "sk-or-test"
+                apiKey: "sk-or-test",
+                supportsResponsesAPI: true
             )
         )
         XCTAssertEqual(bridgeSnapshot.lastModel, "openrouter/anthropic/claude-sonnet-4.5")
@@ -801,6 +831,67 @@ final class AppViewModelTests: XCTestCase {
         )
         XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_BASE_URL"], "http://127.0.0.1:18080")
         XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_API_KEY"], "codex-oauth-bridge")
+    }
+
+    func testDeepSeekProviderAccountOpensClaudeCodeThroughBridge() async throws {
+        let accountID = UUID()
+        let providerAccountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let claudeCLILauncher = RecordingClaudeCLILauncher()
+        let patchedRuntimeManager = RecordingClaudePatchedRuntimeManager()
+        let bridgeManager = RecordingCodexOAuthClaudeBridgeManager()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: providerAccountID,
+                        platform: .codex,
+                        identifier: "acct_deepseek_provider",
+                        displayName: "DeepSeek",
+                        email: "sk-...deepseek",
+                        rule: .openAICompatible,
+                        presetID: "deepseek",
+                        baseURL: "https://api.deepseek.com/v1",
+                        envName: "DEEPSEEK_API_KEY",
+                        model: "deepseek-chat"
+                    ),
+                    payload: try makeProviderCredential("sk-deepseek-test"),
+                    snapshot: nil
+                )
+            ],
+            claudeCLILauncher: claudeCLILauncher,
+            claudePatchedRuntimeManager: patchedRuntimeManager,
+            codexOAuthClaudeBridgeManager: bridgeManager
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.database.account(id: providerAccountID))
+
+        await harness.model.openCLI(
+            for: account,
+            target: .claude,
+            workingDirectoryURL: makeWorkingDirectoryURL("deepseek-claude")
+        )
+
+        let bridgeSnapshot = await bridgeManager.snapshot()
+        XCTAssertEqual(bridgeSnapshot.prepareCallCount, 1)
+        XCTAssertEqual(
+            bridgeSnapshot.lastSource,
+            .provider(
+                baseURL: "https://api.deepseek.com/v1",
+                apiKeyEnvName: "DEEPSEEK_API_KEY",
+                apiKey: "sk-deepseek-test",
+                supportsResponsesAPI: false
+            )
+        )
+        XCTAssertEqual(bridgeSnapshot.lastModel, "deepseek-chat")
+        XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
     }
 
     func testClaudeCompatibleProviderAccountOpensClaudeCodeDirectly() async throws {
@@ -998,6 +1089,60 @@ final class AppViewModelTests: XCTestCase {
                 CLIEnvironmentResolverError.codexCLINotSupported.localizedDescription
             )
         )
+    }
+
+    func testDeepSeekProviderAccountOpensCodexCLIThroughChatCompletionsBridge() async throws {
+        let accountID = UUID()
+        let providerAccountID = UUID()
+        let codexCLILauncher = RecordingCodexCLILauncher()
+        let bridgeManager = RecordingOpenAICompatibleProviderCodexBridgeManager()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: makePayload(accountID: "acct_cached", refreshToken: "refresh_old"),
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: providerAccountID,
+                        platform: .codex,
+                        identifier: "acct_deepseek_provider",
+                        displayName: "DeepSeek",
+                        email: "sk-...deepseek",
+                        rule: .openAICompatible,
+                        presetID: "deepseek",
+                        baseURL: "https://api.deepseek.com/v1",
+                        envName: "DEEPSEEK_API_KEY",
+                        model: "deepseek-reasoner"
+                    ),
+                    payload: try makeProviderCredential("sk-deepseek-test"),
+                    snapshot: nil
+                )
+            ],
+            cliLauncher: codexCLILauncher,
+            openAICompatibleProviderCodexBridgeManager: bridgeManager
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.database.account(id: providerAccountID))
+
+        await harness.model.openCodexCLI(for: account, workingDirectoryURL: makeWorkingDirectoryURL("deepseek-codex"))
+
+        let bridgeSnapshot = await bridgeManager.snapshot()
+        XCTAssertEqual(bridgeSnapshot.prepareCallCount, 1)
+        XCTAssertEqual(bridgeSnapshot.lastAccountID, providerAccountID)
+        XCTAssertEqual(bridgeSnapshot.lastBaseURL, "https://api.deepseek.com/v1")
+        XCTAssertEqual(bridgeSnapshot.lastAPIKeyEnvName, "DEEPSEEK_API_KEY")
+        XCTAssertEqual(bridgeSnapshot.lastAPIKey, "sk-deepseek-test")
+        XCTAssertEqual(bridgeSnapshot.lastModel, "deepseek-reasoner")
+        XCTAssertEqual(codexCLILauncher.launchCallCount, 1)
+        XCTAssertEqual(
+            codexCLILauncher.lastContext?.environmentVariables["OPENAI_API_KEY"],
+            "openai-compatible-provider-bridge"
+        )
+        XCTAssertTrue(codexCLILauncher.lastContext?.configFileContents?.contains("base_url = \"http://127.0.0.1:18082\"") == true)
     }
 
     func testRefreshAllAccountStatusesRefreshesUnifiedQueue() async throws {
@@ -1542,6 +1687,7 @@ final class AppViewModelTests: XCTestCase {
         claudeCLILauncher: any ClaudeCLILaunching = RecordingClaudeCLILauncher(),
         claudePatchedRuntimeManager: any ClaudePatchedRuntimeManaging = RecordingClaudePatchedRuntimeManager(),
         codexOAuthClaudeBridgeManager: any CodexOAuthClaudeBridgeManaging = RecordingCodexOAuthClaudeBridgeManager(),
+        openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging = RecordingOpenAICompatibleProviderCodexBridgeManager(),
         claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging = RecordingClaudeProviderCodexBridgeManager(),
         bannerAutoDismissDuration: Duration = .seconds(10)
     ) async throws -> AppViewModelHarness {
@@ -1640,6 +1786,7 @@ final class AppViewModelTests: XCTestCase {
             claudeCLILauncher: claudeCLILauncher,
             claudePatchedRuntimeManager: claudePatchedRuntimeManager,
             codexOAuthClaudeBridgeManager: codexOAuthClaudeBridgeManager,
+            openAICompatibleProviderCodexBridgeManager: openAICompatibleProviderCodexBridgeManager,
             claudeProviderCodexBridgeManager: claudeProviderCodexBridgeManager,
             bannerAutoDismissDuration: bannerAutoDismissDuration
         )
@@ -2013,6 +2160,55 @@ private actor RecordingCodexOAuthClaudeBridgeManager: CodexOAuthClaudeBridgeMana
             prepareCallCount: prepareCallCount,
             lastAccountID: lastAccountID,
             lastSource: lastSource,
+            lastModel: lastModel
+        )
+    }
+}
+
+private actor RecordingOpenAICompatibleProviderCodexBridgeManager: OpenAICompatibleProviderCodexBridgeManaging {
+    struct Snapshot: Equatable {
+        let prepareCallCount: Int
+        let lastAccountID: UUID?
+        let lastBaseURL: String?
+        let lastAPIKeyEnvName: String?
+        let lastAPIKey: String?
+        let lastModel: String?
+    }
+
+    private var prepareCallCount = 0
+    private var lastAccountID: UUID?
+    private var lastBaseURL: String?
+    private var lastAPIKeyEnvName: String?
+    private var lastAPIKey: String?
+    private var lastModel: String?
+
+    func prepareBridge(
+        accountID: UUID,
+        baseURL: String,
+        apiKeyEnvName: String,
+        apiKey: String,
+        model: String
+    ) async throws -> PreparedOpenAICompatibleProviderCodexBridge {
+        prepareCallCount += 1
+        lastAccountID = accountID
+        lastBaseURL = baseURL
+        lastAPIKeyEnvName = apiKeyEnvName
+        lastAPIKey = apiKey
+        lastModel = model
+        return PreparedOpenAICompatibleProviderCodexBridge(
+            baseURL: "http://127.0.0.1:18082",
+            apiKeyEnvName: "OPENAI_API_KEY",
+            apiKey: "openai-compatible-provider-bridge"
+        )
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(
+            prepareCallCount: prepareCallCount,
+            lastAccountID: lastAccountID,
+            lastBaseURL: lastBaseURL,
+            lastAPIKeyEnvName: lastAPIKeyEnvName,
+            lastAPIKey: lastAPIKey,
             lastModel: lastModel
         )
     }

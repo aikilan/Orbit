@@ -3,6 +3,120 @@ import XCTest
 @testable import CodexAccountSwitcher
 
 final class CodexOAuthClaudeBridgeManagerTests: XCTestCase {
+    func testResponsesChatCompletionsBridgeConvertsResponsesRequestToChatCompletions() throws {
+        let request = try JSONSerialization.data(withJSONObject: [
+            "model": "deepseek-chat",
+            "instructions": "You are Codex.",
+            "input": [
+                [
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "input_text",
+                            "text": "列出当前目录",
+                        ],
+                    ],
+                ],
+                [
+                    "type": "function_call",
+                    "call_id": "call_ls",
+                    "name": "exec",
+                    "arguments": "{\"cmd\":\"ls\"}",
+                ],
+                [
+                    "type": "function_call_output",
+                    "call_id": "call_ls",
+                    "output": "README.md",
+                ],
+            ],
+            "tools": [
+                [
+                    "type": "function",
+                    "name": "exec",
+                    "description": "run shell command",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "cmd": ["type": "string"],
+                        ],
+                    ],
+                ],
+            ],
+            "tool_choice": [
+                "type": "function",
+                "name": "exec",
+            ],
+        ])
+
+        let bridged = try ResponsesChatCompletionsBridge.makeChatCompletionsRequestData(
+            from: request,
+            fallbackModel: "deepseek-chat"
+        )
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: bridged) as? [String: Any])
+        let messages = try XCTUnwrap(object["messages"] as? [[String: Any]])
+        let tools = try XCTUnwrap(object["tools"] as? [[String: Any]])
+        let toolChoice = try XCTUnwrap(object["tool_choice"] as? [String: Any])
+
+        XCTAssertEqual(object["model"] as? String, "deepseek-chat")
+        XCTAssertEqual(messages.first?["role"] as? String, "system")
+        XCTAssertEqual(messages[1]["role"] as? String, "user")
+        XCTAssertEqual(messages[1]["content"] as? String, "列出当前目录")
+        XCTAssertEqual(messages[2]["role"] as? String, "assistant")
+        XCTAssertEqual((messages[2]["tool_calls"] as? [[String: Any]])?.count, 1)
+        XCTAssertEqual(messages[3]["role"] as? String, "tool")
+        XCTAssertEqual(messages[3]["content"] as? String, "README.md")
+        XCTAssertEqual((tools.first?["function"] as? [String: Any])?["name"] as? String, "exec")
+        XCTAssertEqual(toolChoice["type"] as? String, "function")
+    }
+
+    func testResponsesChatCompletionsBridgeConvertsChatCompletionsResponseToResponses() throws {
+        let response = try JSONSerialization.data(withJSONObject: [
+            "id": "chatcmpl_test",
+            "model": "deepseek-chat",
+            "choices": [
+                [
+                    "index": 0,
+                    "message": [
+                        "role": "assistant",
+                        "content": "done",
+                        "tool_calls": [
+                            [
+                                "id": "call_ls",
+                                "type": "function",
+                                "function": [
+                                    "name": "exec",
+                                    "arguments": "{\"cmd\":\"ls\"}",
+                                ],
+                            ],
+                        ],
+                    ],
+                    "finish_reason": "tool_calls",
+                ],
+            ],
+            "usage": [
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            ],
+        ])
+
+        let bridged = try ResponsesChatCompletionsBridge.makeResponsesResponseData(
+            from: response,
+            fallbackModel: "deepseek-chat"
+        )
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: bridged) as? [String: Any])
+        let output = try XCTUnwrap(object["output"] as? [[String: Any]])
+
+        XCTAssertEqual(object["id"] as? String, "chatcmpl_test")
+        XCTAssertEqual(object["model"] as? String, "deepseek-chat")
+        XCTAssertEqual(output.first?["type"] as? String, "message")
+        XCTAssertEqual((output.first?["content"] as? [[String: Any]])?.first?["text"] as? String, "done")
+        XCTAssertEqual(output.last?["type"] as? String, "function_call")
+        XCTAssertEqual(output.last?["name"] as? String, "exec")
+        XCTAssertEqual((object["usage"] as? [String: Any])?["total_tokens"] as? Int, 15)
+    }
+
     func testResponsesBridgeRequestUsesStreamingAndListInput() throws {
         let request = try JSONSerialization.data(withJSONObject: [
             "model": "gpt-5.4",
