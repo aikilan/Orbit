@@ -9,6 +9,40 @@ final class PlatformFoundationTests: XCTestCase {
         )
     }
 
+    func testOpenAICompatiblePresetListIncludesZhipuDomesticAndOverseas() {
+        let presetIDs = Set(ProviderCatalog.presets(for: .openAICompatible).map(\.id))
+
+        XCTAssertTrue(presetIDs.contains("zai"))
+        XCTAssertTrue(presetIDs.contains("bigmodel"))
+    }
+
+    func testSupportsResponsesAPIDetectsZhipuAndZAIAsChatCompletionsOnly() {
+        XCTAssertFalse(
+            ProviderCatalog.supportsResponsesAPI(
+                presetID: "zai",
+                baseURL: "https://api.z.ai/api/coding/paas/v4"
+            )
+        )
+        XCTAssertFalse(
+            ProviderCatalog.supportsResponsesAPI(
+                presetID: "bigmodel",
+                baseURL: "https://open.bigmodel.cn/api/coding/paas/v4"
+            )
+        )
+        XCTAssertFalse(
+            ProviderCatalog.supportsResponsesAPI(
+                presetID: ProviderCatalog.customPresetID,
+                baseURL: "https://open.bigmodel.cn/api/coding/paas/v4"
+            )
+        )
+        XCTAssertFalse(
+            ProviderCatalog.supportsResponsesAPI(
+                presetID: ProviderCatalog.customPresetID,
+                baseURL: "https://api.z.ai/api/coding/paas/v4"
+            )
+        )
+    }
+
     func testLegacyDatabaseDecodesAccountsAsCodexAndBumpsVersion() throws {
         let accountID = UUID()
         let json = """

@@ -105,7 +105,17 @@ enum ProviderCatalog {
             rule: .openAICompatible,
             baseURL: "https://api.z.ai/api/coding/paas/v4",
             apiKeyEnvName: "ZAI_API_KEY",
-            defaultModel: "GLM-4.7"
+            defaultModel: "glm-5",
+            supportsResponsesAPI: false
+        ),
+        ProviderPreset(
+            id: "bigmodel",
+            displayName: "智谱 AI (BigModel CN)",
+            rule: .openAICompatible,
+            baseURL: "https://open.bigmodel.cn/api/coding/paas/v4",
+            apiKeyEnvName: "ZHIPUAI_API_KEY",
+            defaultModel: "glm-5",
+            supportsResponsesAPI: false
         ),
         ProviderPreset(
             id: "anthropic",
@@ -161,7 +171,12 @@ enum ProviderCatalog {
 
         let host = URL(string: trimmedBaseURL)?.host?.lowercased()
             ?? URL(string: "https://\(trimmedBaseURL)")?.host?.lowercased()
-        return host != "api.deepseek.com"
+        switch host {
+        case "api.deepseek.com", "api.z.ai", "open.bigmodel.cn":
+            return false
+        default:
+            return true
+        }
     }
 
     static func providerDisplayName(
