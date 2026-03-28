@@ -97,7 +97,8 @@ enum ProviderCatalog {
             rule: .openAICompatible,
             baseURL: "https://api.moonshot.cn/v1",
             apiKeyEnvName: "MOONSHOT_API_KEY",
-            defaultModel: "kimi-k2-0711-preview"
+            defaultModel: "kimi-k2-0711-preview",
+            supportsResponsesAPI: false
         ),
         ProviderPreset(
             id: "zai",
@@ -172,7 +173,7 @@ enum ProviderCatalog {
         let host = URL(string: trimmedBaseURL)?.host?.lowercased()
             ?? URL(string: "https://\(trimmedBaseURL)")?.host?.lowercased()
         switch host {
-        case "api.deepseek.com", "api.z.ai", "open.bigmodel.cn":
+        case "api.deepseek.com", "api.moonshot.cn", "api.z.ai", "open.bigmodel.cn":
             return false
         default:
             return true

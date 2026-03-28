@@ -9,6 +9,18 @@ final class PlatformFoundationTests: XCTestCase {
         )
     }
 
+    func testOpenAICompatiblePresetListIncludesMoonshot() {
+        XCTAssertTrue(
+            ProviderCatalog.presets(for: .openAICompatible).contains(where: { $0.id == "moonshot" })
+        )
+        XCTAssertFalse(
+            ProviderCatalog.supportsResponsesAPI(
+                presetID: "moonshot",
+                baseURL: "https://api.moonshot.cn/v1"
+            )
+        )
+    }
+
     func testOpenAICompatiblePresetListIncludesZhipuDomesticAndOverseas() {
         let presetIDs = Set(ProviderCatalog.presets(for: .openAICompatible).map(\.id))
 
@@ -39,6 +51,15 @@ final class PlatformFoundationTests: XCTestCase {
             ProviderCatalog.supportsResponsesAPI(
                 presetID: ProviderCatalog.customPresetID,
                 baseURL: "https://api.z.ai/api/coding/paas/v4"
+            )
+        )
+    }
+
+    func testSupportsResponsesAPIDetectsMoonshotAsChatCompletionsOnly() {
+        XCTAssertFalse(
+            ProviderCatalog.supportsResponsesAPI(
+                presetID: ProviderCatalog.customPresetID,
+                baseURL: "https://api.moonshot.cn/v1"
             )
         )
     }

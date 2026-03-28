@@ -1167,6 +1167,68 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
     }
 
+    func testMoonshotProviderAccountOpensClaudeCodeThroughBridge() async throws {
+        let accountID = UUID()
+        let providerAccountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let claudeCLILauncher = RecordingClaudeCLILauncher()
+        let patchedRuntimeManager = RecordingClaudePatchedRuntimeManager()
+        let bridgeManager = RecordingCodexOAuthClaudeBridgeManager()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: providerAccountID,
+                        platform: .codex,
+                        identifier: "acct_moonshot_provider",
+                        displayName: "Moonshot",
+                        email: "sk-...moonshot",
+                        rule: .openAICompatible,
+                        presetID: "moonshot",
+                        baseURL: "https://api.moonshot.cn/v1",
+                        envName: "MOONSHOT_API_KEY",
+                        model: "kimi-k2-0711-preview"
+                    ),
+                    payload: try makeProviderCredential("sk-moonshot-test"),
+                    snapshot: nil
+                )
+            ],
+            claudeCLILauncher: claudeCLILauncher,
+            claudePatchedRuntimeManager: patchedRuntimeManager,
+            codexOAuthClaudeBridgeManager: bridgeManager
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.database.account(id: providerAccountID))
+
+        await harness.model.openCLI(
+            for: account,
+            target: .claude,
+            workingDirectoryURL: makeWorkingDirectoryURL("moonshot-claude")
+        )
+
+        let bridgeSnapshot = await bridgeManager.snapshot()
+        XCTAssertEqual(bridgeSnapshot.prepareCallCount, 1)
+        XCTAssertEqual(
+            bridgeSnapshot.lastSource,
+            .provider(
+                baseURL: "https://api.moonshot.cn/v1",
+                apiKeyEnvName: "MOONSHOT_API_KEY",
+                apiKey: "sk-moonshot-test",
+                supportsResponsesAPI: false
+            )
+        )
+        XCTAssertEqual(bridgeSnapshot.lastModel, "kimi-k2-0711-preview")
+        XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
+        XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
+    }
+
     func testClaudeCompatibleProviderAccountOpensClaudeCodeDirectly() async throws {
         let accountID = UUID()
         let providerAccountID = UUID()
@@ -1410,6 +1472,60 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(bridgeSnapshot.lastAPIKeyEnvName, "DEEPSEEK_API_KEY")
         XCTAssertEqual(bridgeSnapshot.lastAPIKey, "sk-deepseek-test")
         XCTAssertEqual(bridgeSnapshot.lastModel, "deepseek-reasoner")
+        XCTAssertEqual(codexCLILauncher.launchCallCount, 1)
+        XCTAssertEqual(
+            codexCLILauncher.lastContext?.environmentVariables["OPENAI_API_KEY"],
+            "openai-compatible-provider-bridge"
+        )
+        XCTAssertTrue(codexCLILauncher.lastContext?.configFileContents?.contains("base_url = \"http://127.0.0.1:18082\"") == true)
+    }
+
+    func testMoonshotProviderAccountOpensCodexCLIThroughChatCompletionsBridge() async throws {
+        let accountID = UUID()
+        let providerAccountID = UUID()
+        let codexCLILauncher = RecordingCodexCLILauncher()
+        let bridgeManager = RecordingOpenAICompatibleProviderCodexBridgeManager()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: makePayload(accountID: "acct_cached", refreshToken: "refresh_old"),
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: providerAccountID,
+                        platform: .codex,
+                        identifier: "acct_moonshot_provider",
+                        displayName: "Moonshot",
+                        email: "sk-...moonshot",
+                        rule: .openAICompatible,
+                        presetID: "moonshot",
+                        baseURL: "https://api.moonshot.cn/v1",
+                        envName: "MOONSHOT_API_KEY",
+                        model: "kimi-k2-0711-preview"
+                    ),
+                    payload: try makeProviderCredential("sk-moonshot-test"),
+                    snapshot: nil
+                )
+            ],
+            cliLauncher: codexCLILauncher,
+            openAICompatibleProviderCodexBridgeManager: bridgeManager
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.database.account(id: providerAccountID))
+
+        await harness.model.openCodexCLI(for: account, workingDirectoryURL: makeWorkingDirectoryURL("moonshot-codex"))
+
+        let bridgeSnapshot = await bridgeManager.snapshot()
+        XCTAssertEqual(bridgeSnapshot.prepareCallCount, 1)
+        XCTAssertEqual(bridgeSnapshot.lastAccountID, providerAccountID)
+        XCTAssertEqual(bridgeSnapshot.lastBaseURL, "https://api.moonshot.cn/v1")
+        XCTAssertEqual(bridgeSnapshot.lastAPIKeyEnvName, "MOONSHOT_API_KEY")
+        XCTAssertEqual(bridgeSnapshot.lastAPIKey, "sk-moonshot-test")
+        XCTAssertEqual(bridgeSnapshot.lastModel, "kimi-k2-0711-preview")
         XCTAssertEqual(codexCLILauncher.launchCallCount, 1)
         XCTAssertEqual(
             codexCLILauncher.lastContext?.environmentVariables["OPENAI_API_KEY"],
