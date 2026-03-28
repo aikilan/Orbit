@@ -75,14 +75,6 @@ enum ProviderCatalog {
             defaultModel: "gpt-5.4"
         ),
         ProviderPreset(
-            id: "openrouter",
-            displayName: "OpenRouter",
-            rule: .openAICompatible,
-            baseURL: "https://openrouter.ai/api/v1",
-            apiKeyEnvName: "OPENROUTER_API_KEY",
-            defaultModel: "openrouter/anthropic/claude-sonnet-4.5"
-        ),
-        ProviderPreset(
             id: "deepseek",
             displayName: "DeepSeek",
             rule: .openAICompatible,
@@ -98,6 +90,24 @@ enum ProviderCatalog {
             baseURL: "https://api.moonshot.cn/v1",
             apiKeyEnvName: "MOONSHOT_API_KEY",
             defaultModel: "kimi-k2-0711-preview",
+            supportsResponsesAPI: false
+        ),
+        ProviderPreset(
+            id: "minimax",
+            displayName: "MiniMax",
+            rule: .openAICompatible,
+            baseURL: "https://api.minimax.io/v1",
+            apiKeyEnvName: "MINIMAX_API_KEY",
+            defaultModel: "MiniMax-M2.7",
+            supportsResponsesAPI: false
+        ),
+        ProviderPreset(
+            id: "minimax_cn",
+            displayName: "MiniMax (CN)",
+            rule: .openAICompatible,
+            baseURL: "https://api.minimaxi.com/v1",
+            apiKeyEnvName: "MINIMAX_API_KEY",
+            defaultModel: "MiniMax-M2.7",
             supportsResponsesAPI: false
         ),
         ProviderPreset(
@@ -125,6 +135,22 @@ enum ProviderCatalog {
             baseURL: "https://api.anthropic.com/v1",
             apiKeyEnvName: "ANTHROPIC_API_KEY",
             defaultModel: "claude-sonnet-4.5"
+        ),
+        ProviderPreset(
+            id: "minimax_claude",
+            displayName: "MiniMax",
+            rule: .claudeCompatible,
+            baseURL: "https://api.minimax.io/anthropic",
+            apiKeyEnvName: "ANTHROPIC_AUTH_TOKEN",
+            defaultModel: "MiniMax-M2.7"
+        ),
+        ProviderPreset(
+            id: "minimax_claude_cn",
+            displayName: "MiniMax (CN)",
+            rule: .claudeCompatible,
+            baseURL: "https://api.minimaxi.com/anthropic",
+            apiKeyEnvName: "ANTHROPIC_AUTH_TOKEN",
+            defaultModel: "MiniMax-M2.7"
         ),
         ProviderPreset(
             id: customPresetID,

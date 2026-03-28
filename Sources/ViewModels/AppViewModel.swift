@@ -358,7 +358,11 @@ final class AppViewModel: ObservableObject {
     }
 
     var availableProviderPresets: [ProviderPreset] {
-        ProviderCatalog.presets(for: addAccountProviderRule)
+        let presets = ProviderCatalog.presets(for: addAccountProviderRule)
+        if addAccountProviderPresetID == ProviderCatalog.customPresetID {
+            return presets
+        }
+        return presets.filter { $0.id != ProviderCatalog.customPresetID }
     }
 
     var selectedProviderPreset: ProviderPreset? {

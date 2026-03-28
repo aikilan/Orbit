@@ -800,6 +800,64 @@ final class AppViewModelTests: XCTestCase {
         )
     }
 
+    func testAvailableProviderPresetsHideCustomDuringCreateFlow() async throws {
+        let harness = try await makeHarness(
+            accountID: UUID(),
+            cachedPayload: makePayload(accountID: "acct_cached", refreshToken: "refresh_old"),
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false)
+        )
+
+        await harness.model.prepare()
+
+        XCTAssertFalse(harness.model.availableProviderPresets.contains(where: { $0.id == ProviderCatalog.customPresetID }))
+
+        harness.model.addAccountProviderRule = .claudeCompatible
+        harness.model.applyProviderPreset(ProviderCatalog.preset(id: "anthropic"))
+
+        XCTAssertFalse(harness.model.availableProviderPresets.contains(where: { $0.id == ProviderCatalog.customPresetID }))
+    }
+
+    func testAvailableProviderPresetsKeepCustomForEditingExistingCustomAccount() async throws {
+        let accountID = UUID()
+        let customAccountID = UUID()
+        let customCredential = try ProviderAPIKeyCredential(apiKey: "sk-custom-existing").validated()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: makePayload(accountID: "acct_cached", refreshToken: "refresh_old"),
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: customAccountID,
+                        platform: .codex,
+                        identifier: customCredential.accountIdentifier,
+                        displayName: "Custom Existing",
+                        email: customCredential.credentialSummary,
+                        rule: .openAICompatible,
+                        presetID: ProviderCatalog.customPresetID,
+                        providerDisplayName: "Custom Existing",
+                        baseURL: "https://api.deepseek.com/v1",
+                        envName: "DEEPSEEK_API_KEY",
+                        model: "deepseek-chat"
+                    ),
+                    payload: .providerAPIKey(customCredential),
+                    snapshot: nil
+                )
+            ]
+        )
+
+        await harness.model.prepare()
+
+        harness.model.openEditProvider(for: customAccountID)
+
+        XCTAssertTrue(harness.model.availableProviderPresets.contains(where: { $0.id == ProviderCatalog.customPresetID }))
+    }
+
     func testEditProviderKeepsExistingAPIKeyWhenFieldIsEmpty() async throws {
         let accountID = UUID()
         let customAccountID = UUID()
@@ -1050,16 +1108,16 @@ final class AppViewModelTests: XCTestCase {
                     account: makeProviderAccount(
                         id: providerAccountID,
                         platform: .codex,
-                        identifier: "acct_openrouter_provider",
-                        displayName: "OpenRouter",
-                        email: "sk-...router",
+                        identifier: "acct_openai_provider",
+                        displayName: "OpenAI",
+                        email: "sk-...openai",
                         rule: .openAICompatible,
-                        presetID: "openrouter",
-                        baseURL: "https://openrouter.ai/api/v1",
-                        envName: "OPENROUTER_API_KEY",
-                        model: "openrouter/anthropic/claude-sonnet-4.5"
+                        presetID: "openai",
+                        baseURL: "https://api.openai.com/v1",
+                        envName: "OPENAI_API_KEY",
+                        model: "gpt-5.4"
                     ),
-                    payload: try makeProviderCredential("sk-or-test"),
+                    payload: try makeProviderCredential("sk-openai-test"),
                     snapshot: nil
                 )
             ],
@@ -1074,7 +1132,7 @@ final class AppViewModelTests: XCTestCase {
         await harness.model.openCLI(
             for: account,
             target: .claude,
-            workingDirectoryURL: makeWorkingDirectoryURL("openrouter-claude")
+            workingDirectoryURL: makeWorkingDirectoryURL("openai-claude")
         )
 
         let bridgeSnapshot = await bridgeManager.snapshot()
@@ -1083,21 +1141,21 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(
             bridgeSnapshot.lastSource,
             .provider(
-                baseURL: "https://openrouter.ai/api/v1",
-                apiKeyEnvName: "OPENROUTER_API_KEY",
-                apiKey: "sk-or-test",
+                baseURL: "https://api.openai.com/v1",
+                apiKeyEnvName: "OPENAI_API_KEY",
+                apiKey: "sk-openai-test",
                 supportsResponsesAPI: true
             )
         )
-        XCTAssertEqual(bridgeSnapshot.lastModel, "openrouter/anthropic/claude-sonnet-4.5")
+        XCTAssertEqual(bridgeSnapshot.lastModel, "gpt-5.4")
         XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
         XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
         XCTAssertEqual(
             claudeCLILauncher.lastContext?.providerSnapshot,
             ResolvedClaudeProviderSnapshot(
                 source: .inheritCodexEnvironment,
-                model: "openrouter/anthropic/claude-sonnet-4.5",
-                modelProvider: "openrouter",
+                model: "gpt-5.4",
+                modelProvider: "openai",
                 baseURL: "http://127.0.0.1:18080",
                 apiKeyEnvName: "ANTHROPIC_API_KEY"
             )

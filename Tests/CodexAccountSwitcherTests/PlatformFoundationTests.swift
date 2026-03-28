@@ -7,6 +7,9 @@ final class PlatformFoundationTests: XCTestCase {
         XCTAssertTrue(
             ProviderCatalog.presets(for: .openAICompatible).contains(where: { $0.id == "deepseek" })
         )
+        XCTAssertFalse(
+            ProviderCatalog.presets(for: .openAICompatible).contains(where: { $0.id == "openrouter" })
+        )
     }
 
     func testOpenAICompatiblePresetListIncludesMoonshot() {
@@ -19,6 +22,16 @@ final class PlatformFoundationTests: XCTestCase {
                 baseURL: "https://api.moonshot.cn/v1"
             )
         )
+    }
+
+    func testMiniMaxPresetListsIncludeDomesticAndOverseas() {
+        let openAIPresetIDs = Set(ProviderCatalog.presets(for: .openAICompatible).map(\.id))
+        let claudePresetIDs = Set(ProviderCatalog.presets(for: .claudeCompatible).map(\.id))
+
+        XCTAssertTrue(openAIPresetIDs.contains("minimax"))
+        XCTAssertTrue(openAIPresetIDs.contains("minimax_cn"))
+        XCTAssertTrue(claudePresetIDs.contains("minimax_claude"))
+        XCTAssertTrue(claudePresetIDs.contains("minimax_claude_cn"))
     }
 
     func testOpenAICompatiblePresetListIncludesZhipuDomesticAndOverseas() {
@@ -65,6 +78,18 @@ final class PlatformFoundationTests: XCTestCase {
     }
 
     func testSupportsResponsesAPIDetectsMiniMaxAsChatCompletionsOnly() {
+        XCTAssertFalse(
+            ProviderCatalog.supportsResponsesAPI(
+                presetID: "minimax",
+                baseURL: "https://api.minimax.io/v1"
+            )
+        )
+        XCTAssertFalse(
+            ProviderCatalog.supportsResponsesAPI(
+                presetID: "minimax_cn",
+                baseURL: "https://api.minimaxi.com/v1"
+            )
+        )
         XCTAssertFalse(
             ProviderCatalog.supportsResponsesAPI(
                 presetID: ProviderCatalog.customPresetID,
