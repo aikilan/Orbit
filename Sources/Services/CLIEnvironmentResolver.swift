@@ -37,9 +37,11 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
     }
 
     private let fileManager: FileManager
+    private let session: URLSession
 
-    init(fileManager: FileManager = .default) {
+    init(fileManager: FileManager = .default, session: URLSession = .shared) {
         self.fileManager = fileManager
+        self.session = session
     }
 
     func resolveCodexContext(
@@ -97,12 +99,18 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                     apiKey: credential.apiKey
                 )
             } else {
+                let availableModels = await availableModelsForBridge(
+                    account: account,
+                    providerBaseURL: provider.baseURL,
+                    apiKey: credential.apiKey
+                )
                 let bridge = try await openAICompatibleProviderCodexBridgeManager.prepareBridge(
                     accountID: account.id,
                     baseURL: provider.baseURL,
                     apiKeyEnvName: provider.apiKeyEnvName,
                     apiKey: credential.apiKey,
-                    model: account.resolvedDefaultModel
+                    model: account.resolvedDefaultModel,
+                    availableModels: availableModels
                 )
                 resolvedProvider = (
                     baseURL: bridge.baseURL,
@@ -140,12 +148,18 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 throw CLIEnvironmentResolverError.missingProviderCredential
             }
             let provider = try resolvedProviderConfig(for: account)
+            let availableModels = await availableModelsForBridge(
+                account: account,
+                providerBaseURL: provider.baseURL,
+                apiKey: credential.apiKey
+            )
             let bridge = try await claudeProviderCodexBridgeManager.prepareBridge(
                 accountID: account.id,
                 baseURL: provider.baseURL,
                 apiKeyEnvName: provider.apiKeyEnvName,
                 apiKey: credential.apiKey,
-                model: account.resolvedDefaultModel
+                model: account.resolvedDefaultModel,
+                availableModels: availableModels
             )
             let codexHomeURL = isolatedCodexHomeURL(
                 for: account.id,
@@ -247,7 +261,8 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
             let bridge = try await codexOAuthClaudeBridgeManager.prepareBridge(
                 accountID: account.id,
                 source: .codexAuthPayload(codexAuthPayload),
-                model: model
+                model: model,
+                availableModels: [model]
             )
             return try resolvedBridgedClaudeContext(
                 for: account,
@@ -268,6 +283,11 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 throw CLIEnvironmentResolverError.missingProviderCredential
             }
             let provider = try resolvedProviderConfig(for: account)
+            let availableModels = await availableModelsForBridge(
+                account: account,
+                providerBaseURL: provider.baseURL,
+                apiKey: providerCredential.apiKey
+            )
             let bridge = try await codexOAuthClaudeBridgeManager.prepareBridge(
                 accountID: account.id,
                 source: .provider(
@@ -276,7 +296,8 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                     apiKey: providerCredential.apiKey,
                     supportsResponsesAPI: account.supportsResponsesAPI
                 ),
-                model: account.resolvedDefaultModel
+                model: account.resolvedDefaultModel,
+                availableModels: availableModels
             )
             return try resolvedBridgedClaudeContext(
                 for: account,
@@ -368,6 +389,150 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
         variables["ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"] = provider.model
         variables["CLAUDE_CODE_SUBAGENT_MODEL"] = provider.model
         return variables
+    }
+
+    private func availableModelsForBridge(
+        account: ManagedAccount,
+        providerBaseURL: String,
+        apiKey: String
+    ) async -> [String] {
+        let fallbackModels = fallbackAvailableModels(defaultModel: account.resolvedDefaultModel)
+        guard shouldPrefetchModels(for: account) else {
+            return fallbackModels
+        }
+
+        do {
+            let modelIDs = try await fetchModelIDs(
+                for: account.providerRule,
+                baseURL: providerBaseURL,
+                apiKey: apiKey
+            )
+            return mergedAvailableModels(modelIDs, defaultModel: account.resolvedDefaultModel)
+        } catch {
+            return fallbackModels
+        }
+    }
+
+    private func shouldPrefetchModels(for account: ManagedAccount) -> Bool {
+        guard
+            let presetID = account.providerPresetID?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !presetID.isEmpty,
+            let preset = ProviderCatalog.preset(id: presetID)
+        else {
+            return false
+        }
+
+        return !preset.isCustom
+    }
+
+    private func fetchModelIDs(
+        for rule: ProviderRule,
+        baseURL: String,
+        apiKey: String
+    ) async throws -> [String] {
+        switch rule {
+        case .openAICompatible:
+            return try await fetchOpenAICompatibleModelIDs(baseURL: baseURL, apiKey: apiKey)
+        case .claudeCompatible:
+            return try await fetchClaudeCompatibleModelIDs(baseURL: baseURL, apiKey: apiKey)
+        case .chatgptOAuth, .claudeProfile:
+            return []
+        }
+    }
+
+    private func fetchOpenAICompatibleModelIDs(baseURL: String, apiKey: String) async throws -> [String] {
+        let normalizedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let url = try validURL("\(normalizedBaseURL)/models")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await session.data(for: request)
+        try validateModelListResponse(response, data: data)
+        return parseModelIDs(from: data)
+    }
+
+    private func fetchClaudeCompatibleModelIDs(baseURL: String, apiKey: String) async throws -> [String] {
+        let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestURL: URL
+
+        if let minimaxBaseURL = normalizedMiniMaxAnthropicBaseURL(trimmedBaseURL, includeVersion: true) {
+            requestURL = try validURL("\(minimaxBaseURL)/models")
+        } else {
+            let normalizedBaseURL = trimmedBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            requestURL = try validURL("\(normalizedBaseURL)/models")
+        }
+
+        var request = URLRequest(url: requestURL)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+
+        if normalizedMiniMaxAnthropicBaseURL(trimmedBaseURL, includeVersion: false) != nil {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        } else {
+            request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        }
+
+        let (data, response) = try await session.data(for: request)
+        try validateModelListResponse(response, data: data)
+        return parseModelIDs(from: data)
+    }
+
+    private func validateModelListResponse(_ response: URLResponse, data: Data) throws {
+        guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
+            throw NSError(
+                domain: "CLIEnvironmentResolver",
+                code: (response as? HTTPURLResponse)?.statusCode ?? -1,
+                userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? ""]
+            )
+        }
+    }
+
+    private func parseModelIDs(from data: Data) -> [String] {
+        guard
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let rawModels = object["data"] as? [[String: Any]]
+        else {
+            return []
+        }
+
+        return rawModels.compactMap { model in
+            let trimmedID = (model["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmedID.isEmpty ? nil : trimmedID
+        }
+    }
+
+    private func fallbackAvailableModels(defaultModel: String) -> [String] {
+        let trimmedModel = defaultModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedModel.isEmpty ? [] : [trimmedModel]
+    }
+
+    private func mergedAvailableModels(_ models: [String], defaultModel: String) -> [String] {
+        var normalized = [String]()
+        var seen = Set<String>()
+
+        for model in models {
+            let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedModel.isEmpty, seen.insert(trimmedModel).inserted else { continue }
+            normalized.append(trimmedModel)
+        }
+
+        let trimmedDefaultModel = defaultModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedDefaultModel.isEmpty, seen.insert(trimmedDefaultModel).inserted {
+            normalized.append(trimmedDefaultModel)
+        }
+
+        return normalized
+    }
+
+    private func validURL(_ value: String) throws -> URL {
+        guard let url = URL(string: value) else {
+            throw CLIEnvironmentResolverError.invalidProviderConfiguration
+        }
+        return url
     }
 
     private func resolvedProviderConfig(for account: ManagedAccount) throws -> (identifier: String, displayName: String, baseURL: String, apiKeyEnvName: String) {

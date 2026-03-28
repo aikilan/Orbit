@@ -162,7 +162,8 @@ private struct NoopCodexOAuthClaudeBridgeManager: CodexOAuthClaudeBridgeManaging
     func prepareBridge(
         accountID: UUID,
         source: OpenAICompatibleClaudeBridgeSource,
-        model: String
+        model: String,
+        availableModels: [String]
     ) async throws -> PreparedCodexOAuthClaudeBridge {
         PreparedCodexOAuthClaudeBridge(
             baseURL: "http://127.0.0.1:18080",
@@ -178,7 +179,8 @@ private struct NoopOpenAICompatibleProviderCodexBridgeManager: OpenAICompatibleP
         baseURL: String,
         apiKeyEnvName: String,
         apiKey: String,
-        model: String
+        model: String,
+        availableModels: [String]
     ) async throws -> PreparedOpenAICompatibleProviderCodexBridge {
         PreparedOpenAICompatibleProviderCodexBridge(
             baseURL: "http://127.0.0.1:18082",
@@ -194,7 +196,8 @@ private struct NoopClaudeProviderCodexBridgeManager: ClaudeProviderCodexBridgeMa
         baseURL: String,
         apiKeyEnvName: String,
         apiKey: String,
-        model: String
+        model: String,
+        availableModels: [String]
     ) async throws -> PreparedClaudeProviderCodexBridge {
         PreparedClaudeProviderCodexBridge(
             baseURL: "http://127.0.0.1:18081",

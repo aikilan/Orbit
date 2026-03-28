@@ -34,7 +34,8 @@ actor OpenAICompatibleProviderCodexBridgeManager {
         baseURL: String,
         apiKeyEnvName: String,
         apiKey: String,
-        model: String
+        model: String,
+        availableModels: [String]
     ) async throws -> PreparedOpenAICompatibleProviderCodexBridge {
         let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -50,7 +51,8 @@ actor OpenAICompatibleProviderCodexBridgeManager {
             baseURL: trimmedBaseURL,
             apiKeyEnvName: apiKeyEnvName.trimmingCharacters(in: .whitespacesAndNewlines),
             apiKey: trimmedAPIKey,
-            model: trimmedModel
+            model: trimmedModel,
+            availableModels: availableModels
         )
         let localBaseURL = try await server.startIfNeeded()
         servers[accountID.uuidString] = server
@@ -107,6 +109,7 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
     private var apiKeyEnvName = "OPENAI_API_KEY"
     private var apiKey = ""
     private var defaultModel = "gpt-5.4"
+    private var availableModels = ["gpt-5.4"]
 
     init(
         sendUpstreamRequest: @escaping @Sendable (String, String, Data) async throws -> (Int, Data)
@@ -114,12 +117,13 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
         self.sendUpstreamRequest = sendUpstreamRequest
     }
 
-    func update(baseURL: String, apiKeyEnvName: String, apiKey: String, model: String) {
+    func update(baseURL: String, apiKeyEnvName: String, apiKey: String, model: String, availableModels: [String]) {
         stateQueue.sync {
             self.upstreamBaseURL = baseURL
             self.apiKeyEnvName = apiKeyEnvName.isEmpty ? "OPENAI_API_KEY" : apiKeyEnvName
             self.apiKey = apiKey
             self.defaultModel = model
+            self.availableModels = normalizedAvailableModels(availableModels, fallbackModel: model)
         }
     }
 
@@ -265,7 +269,7 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
         case ("POST", "/responses"), ("POST", "/v1/responses"):
             return await responsesResponse(for: request)
         case ("GET", "/models"), ("GET", "/v1/models"):
-            return jsonResponse(statusCode: 200, body: jsonData(["data": [modelObject()]]))
+            return jsonResponse(statusCode: 200, body: jsonData(["data": modelObjects()]))
         default:
             return jsonResponse(statusCode: 404, body: errorPayload(message: L10n.tr("不支持的 Codex Provider 路径。")))
         }
@@ -318,9 +322,9 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
         return object
     }
 
-    private func currentState() -> (baseURL: String, apiKeyEnvName: String, apiKey: String, defaultModel: String) {
+    private func currentState() -> (baseURL: String, apiKeyEnvName: String, apiKey: String, defaultModel: String, availableModels: [String]) {
         stateQueue.sync {
-            (upstreamBaseURL, apiKeyEnvName, apiKey, defaultModel)
+            (upstreamBaseURL, apiKeyEnvName, apiKey, defaultModel, availableModels)
         }
     }
 
@@ -356,13 +360,36 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
         (try? JSONSerialization.data(withJSONObject: object, options: [])) ?? Data("{}".utf8)
     }
 
-    private func modelObject() -> [String: Any] {
-        let model = currentState().defaultModel
+    private func modelObjects() -> [[String: Any]] {
+        let state = currentState()
+        let models = state.availableModels.isEmpty ? [state.defaultModel] : state.availableModels
+        return models.map(modelObject(for:))
+    }
+
+    private func modelObject(for model: String) -> [String: Any] {
         return [
             "id": model,
             "object": "model",
             "owned_by": "openai-compatible-provider",
         ]
+    }
+
+    private func normalizedAvailableModels(_ availableModels: [String], fallbackModel: String) -> [String] {
+        var normalized = [String]()
+        var seen = Set<String>()
+
+        for model in availableModels {
+            let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, seen.insert(trimmed).inserted else { continue }
+            normalized.append(trimmed)
+        }
+
+        let trimmedFallback = fallbackModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedFallback.isEmpty, seen.insert(trimmedFallback).inserted {
+            normalized.append(trimmedFallback)
+        }
+
+        return normalized
     }
 
     private func reasonPhrase(for statusCode: Int) -> String {

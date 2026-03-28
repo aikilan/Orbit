@@ -193,7 +193,8 @@ actor CodexOAuthClaudeBridgeManager {
     func prepareBridge(
         accountID: UUID,
         source: OpenAICompatibleClaudeBridgeSource,
-        model: String
+        model: String,
+        availableModels: [String]
     ) async throws -> PreparedCodexOAuthClaudeBridge {
         if case let .codexAuthPayload(payload) = source,
            payload.authMode != .chatgpt && payload.authMode != .openAIAPIKey
@@ -203,7 +204,7 @@ actor CodexOAuthClaudeBridgeManager {
 
         let key = accountID.uuidString
         let server = servers[key] ?? CodexOAuthClaudeBridgeServer(sendUpstreamRequest: sendUpstreamRequest)
-        server.update(source: source, defaultModel: model)
+        server.update(source: source, defaultModel: model, availableModels: availableModels)
         let baseURL = try await server.startIfNeeded()
         servers[key] = server
 
@@ -260,6 +261,7 @@ fileprivate final class CodexOAuthClaudeBridgeServer: @unchecked Sendable {
     private var baseURL: String?
     private var source: OpenAICompatibleClaudeBridgeSource?
     private var defaultModel = "gpt-5.4"
+    private var availableModels = ["gpt-5.4"]
 
     init(
         sendUpstreamRequest: @escaping @Sendable (OpenAICompatibleClaudeBridgeSource, Data) async throws -> CodexOAuthClaudeBridgeUpstreamResponse
@@ -267,12 +269,13 @@ fileprivate final class CodexOAuthClaudeBridgeServer: @unchecked Sendable {
         self.sendUpstreamRequest = sendUpstreamRequest
     }
 
-    func update(source: OpenAICompatibleClaudeBridgeSource, defaultModel: String) {
+    func update(source: OpenAICompatibleClaudeBridgeSource, defaultModel: String, availableModels: [String]) {
         stateQueue.sync {
             self.source = source
             if !defaultModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 self.defaultModel = defaultModel
             }
+            self.availableModels = normalizedAvailableModels(availableModels, fallbackModel: defaultModel)
         }
     }
 
@@ -436,7 +439,9 @@ fileprivate final class CodexOAuthClaudeBridgeServer: @unchecked Sendable {
 
     private func messageResponse(for request: HTTPRequest) async -> HTTPResponse {
         do {
-            let (source, defaultModel) = currentState()
+            let state = currentState()
+            let source = state.source
+            let defaultModel = state.defaultModel
             guard let source else {
                 return jsonResponse(
                     statusCode: 502,
@@ -497,19 +502,23 @@ fileprivate final class CodexOAuthClaudeBridgeServer: @unchecked Sendable {
     }
 
     private func modelsResponse() -> HTTPResponse {
-        let model = currentState().defaultModel
+        let state = currentState()
+        let models = state.availableModels.isEmpty ? [state.defaultModel] : state.availableModels
         let payload: [String: Any] = [
-            "data": [modelObject(for: model)],
+            "data": models.map(modelObject(for:)),
             "has_more": false,
-            "first_id": model,
-            "last_id": model,
+            "first_id": models.first ?? state.defaultModel,
+            "last_id": models.last ?? state.defaultModel,
         ]
         return jsonResponse(statusCode: 200, body: jsonData(payload))
     }
 
     private func modelResponse(id: String) -> HTTPResponse {
-        let model = id.trimmingCharacters(in: .whitespacesAndNewlines)
-        return jsonResponse(statusCode: 200, body: jsonData(modelObject(for: model.isEmpty ? currentState().defaultModel : model)))
+        let state = currentState()
+        let requestedModel = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedModel = state.availableModels.first(where: { $0 == requestedModel })
+            ?? (requestedModel.isEmpty ? state.defaultModel : requestedModel)
+        return jsonResponse(statusCode: 200, body: jsonData(modelObject(for: resolvedModel)))
     }
 
     private func modelObject(for model: String) -> [String: Any] {
@@ -520,10 +529,28 @@ fileprivate final class CodexOAuthClaudeBridgeServer: @unchecked Sendable {
         ]
     }
 
-    private func currentState() -> (source: OpenAICompatibleClaudeBridgeSource?, defaultModel: String) {
+    private func currentState() -> (source: OpenAICompatibleClaudeBridgeSource?, defaultModel: String, availableModels: [String]) {
         stateQueue.sync {
-            (source, defaultModel)
+            (source, defaultModel, availableModels)
         }
+    }
+
+    private func normalizedAvailableModels(_ availableModels: [String], fallbackModel: String) -> [String] {
+        var normalized = [String]()
+        var seen = Set<String>()
+
+        for model in availableModels {
+            let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, seen.insert(trimmed).inserted else { continue }
+            normalized.append(trimmed)
+        }
+
+        let trimmedFallback = fallbackModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedFallback.isEmpty, seen.insert(trimmedFallback).inserted {
+            normalized.append(trimmedFallback)
+        }
+
+        return normalized
     }
 
     private func send(response: HTTPResponse, through connection: NWConnection) {

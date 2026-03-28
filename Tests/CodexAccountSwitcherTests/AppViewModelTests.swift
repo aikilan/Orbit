@@ -2817,22 +2817,26 @@ private actor RecordingCodexOAuthClaudeBridgeManager: CodexOAuthClaudeBridgeMana
         let lastAccountID: UUID?
         let lastSource: OpenAICompatibleClaudeBridgeSource?
         let lastModel: String?
+        let lastAvailableModels: [String]?
     }
 
     private var prepareCallCount = 0
     private var lastAccountID: UUID?
     private var lastSource: OpenAICompatibleClaudeBridgeSource?
     private var lastModel: String?
+    private var lastAvailableModels: [String]?
 
     func prepareBridge(
         accountID: UUID,
         source: OpenAICompatibleClaudeBridgeSource,
-        model: String
+        model: String,
+        availableModels: [String]
     ) async throws -> PreparedCodexOAuthClaudeBridge {
         prepareCallCount += 1
         lastAccountID = accountID
         lastSource = source
         lastModel = model
+        lastAvailableModels = availableModels
         return PreparedCodexOAuthClaudeBridge(
             baseURL: "http://127.0.0.1:18080",
             apiKeyEnvName: "ANTHROPIC_API_KEY",
@@ -2845,7 +2849,8 @@ private actor RecordingCodexOAuthClaudeBridgeManager: CodexOAuthClaudeBridgeMana
             prepareCallCount: prepareCallCount,
             lastAccountID: lastAccountID,
             lastSource: lastSource,
-            lastModel: lastModel
+            lastModel: lastModel,
+            lastAvailableModels: lastAvailableModels
         )
     }
 }
@@ -2858,6 +2863,7 @@ private actor RecordingOpenAICompatibleProviderCodexBridgeManager: OpenAICompati
         let lastAPIKeyEnvName: String?
         let lastAPIKey: String?
         let lastModel: String?
+        let lastAvailableModels: [String]?
     }
 
     private var prepareCallCount = 0
@@ -2866,13 +2872,15 @@ private actor RecordingOpenAICompatibleProviderCodexBridgeManager: OpenAICompati
     private var lastAPIKeyEnvName: String?
     private var lastAPIKey: String?
     private var lastModel: String?
+    private var lastAvailableModels: [String]?
 
     func prepareBridge(
         accountID: UUID,
         baseURL: String,
         apiKeyEnvName: String,
         apiKey: String,
-        model: String
+        model: String,
+        availableModels: [String]
     ) async throws -> PreparedOpenAICompatibleProviderCodexBridge {
         prepareCallCount += 1
         lastAccountID = accountID
@@ -2880,6 +2888,7 @@ private actor RecordingOpenAICompatibleProviderCodexBridgeManager: OpenAICompati
         lastAPIKeyEnvName = apiKeyEnvName
         lastAPIKey = apiKey
         lastModel = model
+        lastAvailableModels = availableModels
         return PreparedOpenAICompatibleProviderCodexBridge(
             baseURL: "http://127.0.0.1:18082",
             apiKeyEnvName: "OPENAI_API_KEY",
@@ -2894,7 +2903,8 @@ private actor RecordingOpenAICompatibleProviderCodexBridgeManager: OpenAICompati
             lastBaseURL: lastBaseURL,
             lastAPIKeyEnvName: lastAPIKeyEnvName,
             lastAPIKey: lastAPIKey,
-            lastModel: lastModel
+            lastModel: lastModel,
+            lastAvailableModels: lastAvailableModels
         )
     }
 }
@@ -2907,6 +2917,7 @@ private actor RecordingClaudeProviderCodexBridgeManager: ClaudeProviderCodexBrid
         let lastAPIKeyEnvName: String?
         let lastAPIKey: String?
         let lastModel: String?
+        let lastAvailableModels: [String]?
     }
 
     private var prepareCallCount = 0
@@ -2915,13 +2926,15 @@ private actor RecordingClaudeProviderCodexBridgeManager: ClaudeProviderCodexBrid
     private var lastAPIKeyEnvName: String?
     private var lastAPIKey: String?
     private var lastModel: String?
+    private var lastAvailableModels: [String]?
 
     func prepareBridge(
         accountID: UUID,
         baseURL: String,
         apiKeyEnvName: String,
         apiKey: String,
-        model: String
+        model: String,
+        availableModels: [String]
     ) async throws -> PreparedClaudeProviderCodexBridge {
         prepareCallCount += 1
         lastAccountID = accountID
@@ -2929,6 +2942,7 @@ private actor RecordingClaudeProviderCodexBridgeManager: ClaudeProviderCodexBrid
         lastAPIKeyEnvName = apiKeyEnvName
         lastAPIKey = apiKey
         lastModel = model
+        lastAvailableModels = availableModels
         return PreparedClaudeProviderCodexBridge(
             baseURL: "http://127.0.0.1:18081",
             apiKeyEnvName: "OPENAI_API_KEY",
@@ -2943,7 +2957,8 @@ private actor RecordingClaudeProviderCodexBridgeManager: ClaudeProviderCodexBrid
             lastBaseURL: lastBaseURL,
             lastAPIKeyEnvName: lastAPIKeyEnvName,
             lastAPIKey: lastAPIKey,
-            lastModel: lastModel
+            lastModel: lastModel,
+            lastAvailableModels: lastAvailableModels
         )
     }
 }

@@ -59,7 +59,8 @@ final class OpenAICompatibleProviderCodexBridgeManagerTests: XCTestCase {
             baseURL: "https://api.deepseek.com/v1",
             apiKeyEnvName: "DEEPSEEK_API_KEY",
             apiKey: "sk-deepseek-test",
-            model: "deepseek-chat"
+            model: "deepseek-chat",
+            availableModels: ["deepseek-chat"]
         )
 
         var request = URLRequest(url: try XCTUnwrap(URL(string: "\(bridge.baseURL)/v1/responses")))
@@ -148,7 +149,8 @@ final class OpenAICompatibleProviderCodexBridgeManagerTests: XCTestCase {
             baseURL: "https://api.deepseek.com/v1",
             apiKeyEnvName: "DEEPSEEK_API_KEY",
             apiKey: "sk-deepseek-test",
-            model: "deepseek-chat"
+            model: "deepseek-chat",
+            availableModels: ["deepseek-chat"]
         )
 
         var request = URLRequest(url: try XCTUnwrap(URL(string: "\(bridge.baseURL)/v1/responses")))
@@ -175,5 +177,57 @@ final class OpenAICompatibleProviderCodexBridgeManagerTests: XCTestCase {
         XCTAssertTrue(text.contains("\"text\":\"嗨。\""))
         XCTAssertTrue(text.contains("event: response.completed"))
         XCTAssertTrue(text.contains("data: [DONE]"))
+    }
+
+    func testModelsEndpointReturnsAvailableModelsAndAppendsDefaultModel() async throws {
+        let manager = OpenAICompatibleProviderCodexBridgeManager(
+            sendUpstreamRequest: { _, _, _ in
+                XCTFail("不应该触发上游请求")
+                return (200, Data("{}".utf8))
+            }
+        )
+
+        let bridge = try await manager.prepareBridge(
+            accountID: UUID(),
+            baseURL: "https://api.deepseek.com/v1",
+            apiKeyEnvName: "DEEPSEEK_API_KEY",
+            apiKey: "sk-deepseek-test",
+            model: "deepseek-coder",
+            availableModels: ["deepseek-chat", "deepseek-reasoner"]
+        )
+
+        let session = URLSession(configuration: .ephemeral)
+        let (data, response) = try await session.data(from: try XCTUnwrap(URL(string: "\(bridge.baseURL)/v1/models")))
+        let httpResponse = try XCTUnwrap(response as? HTTPURLResponse)
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let models = try XCTUnwrap(object["data"] as? [[String: Any]])
+
+        XCTAssertEqual(httpResponse.statusCode, 200)
+        XCTAssertEqual(models.compactMap { $0["id"] as? String }, ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"])
+    }
+
+    func testModelsEndpointFallsBackToSingleDefaultModel() async throws {
+        let manager = OpenAICompatibleProviderCodexBridgeManager(
+            sendUpstreamRequest: { _, _, _ in
+                XCTFail("不应该触发上游请求")
+                return (200, Data("{}".utf8))
+            }
+        )
+
+        let bridge = try await manager.prepareBridge(
+            accountID: UUID(),
+            baseURL: "https://api.deepseek.com/v1",
+            apiKeyEnvName: "DEEPSEEK_API_KEY",
+            apiKey: "sk-deepseek-test",
+            model: "deepseek-chat",
+            availableModels: []
+        )
+
+        let session = URLSession(configuration: .ephemeral)
+        let (data, _) = try await session.data(from: try XCTUnwrap(URL(string: "\(bridge.baseURL)/models")))
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let models = try XCTUnwrap(object["data"] as? [[String: Any]])
+
+        XCTAssertEqual(models.compactMap { $0["id"] as? String }, ["deepseek-chat"])
     }
 }

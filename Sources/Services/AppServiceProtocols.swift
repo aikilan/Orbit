@@ -60,7 +60,8 @@ protocol CodexOAuthClaudeBridgeManaging: Sendable {
     func prepareBridge(
         accountID: UUID,
         source: OpenAICompatibleClaudeBridgeSource,
-        model: String
+        model: String,
+        availableModels: [String]
     ) async throws -> PreparedCodexOAuthClaudeBridge
 }
 
@@ -82,7 +83,8 @@ protocol ClaudeProviderCodexBridgeManaging: Sendable {
         baseURL: String,
         apiKeyEnvName: String,
         apiKey: String,
-        model: String
+        model: String,
+        availableModels: [String]
     ) async throws -> PreparedClaudeProviderCodexBridge
 }
 
@@ -92,7 +94,8 @@ protocol OpenAICompatibleProviderCodexBridgeManaging: Sendable {
         baseURL: String,
         apiKeyEnvName: String,
         apiKey: String,
-        model: String
+        model: String,
+        availableModels: [String]
     ) async throws -> PreparedOpenAICompatibleProviderCodexBridge
 }
 
