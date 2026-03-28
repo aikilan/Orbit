@@ -84,27 +84,38 @@ struct CodexOAuthClaudeBridgeUpstreamResponse: Sendable {
 }
 
 private func defaultCodexOAuthClaudeBridgeUpstreamRequest(
-    payload: CodexAuthPayload,
+    source: OpenAICompatibleClaudeBridgeSource,
     body: Data
 ) async throws -> CodexOAuthClaudeBridgeUpstreamResponse {
     let url: URL
     let authorizationValue: String
     let accountID: String?
 
-    switch payload.authMode {
-    case .chatgpt:
-        url = URL(string: "https://chatgpt.com/backend-api/codex/responses")!
-        authorizationValue = "Bearer \(payload.tokens.accessToken)"
-        accountID = payload.tokens.accountID
-    case .openAIAPIKey:
-        guard let apiKey = payload.openAIAPIKey?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
+    switch source {
+    case let .codexAuthPayload(payload):
+        switch payload.authMode {
+        case .chatgpt:
+            url = URL(string: "https://chatgpt.com/backend-api/codex/responses")!
+            authorizationValue = "Bearer \(payload.tokens.accessToken)"
+            accountID = payload.tokens.accountID
+        case .openAIAPIKey:
+            guard let apiKey = payload.openAIAPIKey?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
+                throw CodexOAuthClaudeBridgeManagerError.unsupportedAuthMode
+            }
+            url = URL(string: "https://api.openai.com/v1/responses")!
+            authorizationValue = "Bearer \(apiKey)"
+            accountID = nil
+        case .claudeProfile, .anthropicAPIKey, .providerAPIKey:
             throw CodexOAuthClaudeBridgeManagerError.unsupportedAuthMode
         }
-        url = URL(string: "https://api.openai.com/v1/responses")!
+    case let .provider(baseURL, _, apiKey):
+        let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !trimmedBaseURL.isEmpty, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CodexOAuthClaudeBridgeManagerError.unsupportedAuthMode
+        }
+        url = URL(string: "\(trimmedBaseURL)/responses")!
         authorizationValue = "Bearer \(apiKey)"
         accountID = nil
-    case .claudeProfile, .anthropicAPIKey:
-        throw CodexOAuthClaudeBridgeManagerError.unsupportedAuthMode
     }
 
     var request = URLRequest(url: url)
@@ -137,27 +148,29 @@ enum CodexOAuthClaudeBridgeManagerError: LocalizedError, Equatable {
 }
 
 actor CodexOAuthClaudeBridgeManager {
-    private let sendUpstreamRequest: @Sendable (CodexAuthPayload, Data) async throws -> CodexOAuthClaudeBridgeUpstreamResponse
+    private let sendUpstreamRequest: @Sendable (OpenAICompatibleClaudeBridgeSource, Data) async throws -> CodexOAuthClaudeBridgeUpstreamResponse
     private var servers: [String: CodexOAuthClaudeBridgeServer] = [:]
 
     init(
-        sendUpstreamRequest: @escaping @Sendable (CodexAuthPayload, Data) async throws -> CodexOAuthClaudeBridgeUpstreamResponse = defaultCodexOAuthClaudeBridgeUpstreamRequest
+        sendUpstreamRequest: @escaping @Sendable (OpenAICompatibleClaudeBridgeSource, Data) async throws -> CodexOAuthClaudeBridgeUpstreamResponse = defaultCodexOAuthClaudeBridgeUpstreamRequest
     ) {
         self.sendUpstreamRequest = sendUpstreamRequest
     }
 
     func prepareBridge(
         accountID: UUID,
-        payload: CodexAuthPayload,
+        source: OpenAICompatibleClaudeBridgeSource,
         model: String
     ) async throws -> PreparedCodexOAuthClaudeBridge {
-        guard payload.authMode == .chatgpt || payload.authMode == .openAIAPIKey else {
+        if case let .codexAuthPayload(payload) = source,
+           payload.authMode != .chatgpt && payload.authMode != .openAIAPIKey
+        {
             throw CodexOAuthClaudeBridgeManagerError.unsupportedAuthMode
         }
 
         let key = accountID.uuidString
         let server = servers[key] ?? CodexOAuthClaudeBridgeServer(sendUpstreamRequest: sendUpstreamRequest)
-        server.update(payload: payload, defaultModel: model)
+        server.update(source: source, defaultModel: model)
         let baseURL = try await server.startIfNeeded()
         servers[key] = server
 
@@ -209,21 +222,21 @@ fileprivate final class CodexOAuthClaudeBridgeServer: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "com.openai.CodexAccountSwitcher.claude-bridge")
     private let stateQueue = DispatchQueue(label: "com.openai.CodexAccountSwitcher.claude-bridge.state")
-    private let sendUpstreamRequest: @Sendable (CodexAuthPayload, Data) async throws -> CodexOAuthClaudeBridgeUpstreamResponse
+    private let sendUpstreamRequest: @Sendable (OpenAICompatibleClaudeBridgeSource, Data) async throws -> CodexOAuthClaudeBridgeUpstreamResponse
     private var listener: NWListener?
     private var baseURL: String?
-    private var payload: CodexAuthPayload?
+    private var source: OpenAICompatibleClaudeBridgeSource?
     private var defaultModel = "gpt-5.4"
 
     init(
-        sendUpstreamRequest: @escaping @Sendable (CodexAuthPayload, Data) async throws -> CodexOAuthClaudeBridgeUpstreamResponse
+        sendUpstreamRequest: @escaping @Sendable (OpenAICompatibleClaudeBridgeSource, Data) async throws -> CodexOAuthClaudeBridgeUpstreamResponse
     ) {
         self.sendUpstreamRequest = sendUpstreamRequest
     }
 
-    func update(payload: CodexAuthPayload, defaultModel: String) {
+    func update(source: OpenAICompatibleClaudeBridgeSource, defaultModel: String) {
         stateQueue.sync {
-            self.payload = payload
+            self.source = source
             if !defaultModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 self.defaultModel = defaultModel
             }
@@ -390,15 +403,15 @@ fileprivate final class CodexOAuthClaudeBridgeServer: @unchecked Sendable {
 
     private func messageResponse(for request: HTTPRequest) async -> HTTPResponse {
         do {
-            let (payload, defaultModel) = currentState()
-            guard let payload else {
+            let (source, defaultModel) = currentState()
+            guard let source else {
                 return jsonResponse(
                     statusCode: 502,
                     body: errorPayload(type: "api_error", message: L10n.tr("本地 Codex 凭据桥接启动失败。"))
                 )
             }
             let upstreamBody = try Self.makeResponsesRequestData(from: request.body, fallbackModel: defaultModel)
-            let upstreamResponse = try await sendUpstreamRequest(payload, upstreamBody)
+            let upstreamResponse = try await sendUpstreamRequest(source, upstreamBody)
 
             if (200..<300).contains(upstreamResponse.statusCode) {
                 let normalizedBody = try Self.extractCompletedResponsesData(from: upstreamResponse.body)
@@ -474,9 +487,9 @@ fileprivate final class CodexOAuthClaudeBridgeServer: @unchecked Sendable {
         ]
     }
 
-    private func currentState() -> (payload: CodexAuthPayload?, defaultModel: String) {
+    private func currentState() -> (source: OpenAICompatibleClaudeBridgeSource?, defaultModel: String) {
         stateQueue.sync {
-            (payload, defaultModel)
+            (source, defaultModel)
         }
     }
 

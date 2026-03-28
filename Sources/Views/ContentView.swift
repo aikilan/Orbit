@@ -349,15 +349,13 @@ private struct AccountListRow: View {
     }
 
     private var accountSubtitle: String {
-        switch account.authKind {
-        case .chatgpt:
+        switch account.providerRule {
+        case .chatgptOAuth:
             return account.email ?? account.accountIdentifier
-        case .openAIAPIKey:
-            return account.email ?? "OpenAI API Key"
+        case .openAICompatible, .claudeCompatible:
+            return account.email ?? account.resolvedProviderDisplayName
         case .claudeProfile:
             return L10n.tr("Claude Profile")
-        case .anthropicAPIKey:
-            return account.email ?? "Anthropic API Key"
         }
     }
 
@@ -368,7 +366,7 @@ private struct AccountListRow: View {
         if let claudeSnapshot {
             return L10n.tr("请求剩余 %@", claudeRemainingText(claudeSnapshot.requests.remaining))
         }
-        if account.platform == .claude, account.authKind == .claudeProfile {
+        if account.providerRule == .claudeProfile {
             return L10n.tr("本地 Profile")
         }
         return nil
@@ -392,7 +390,6 @@ private struct AccountDetailView: View {
     let onDelete: () -> Void
 
     @State private var draftName = ""
-    @State private var isManagingCLIEnvironments = false
 
     var body: some View {
         ScrollView {
@@ -441,9 +438,6 @@ private struct AccountDetailView: View {
         .onChange(of: account.id) { _, _ in
             draftName = account.displayName
         }
-        .sheet(isPresented: $isManagingCLIEnvironments) {
-            CLIEnvironmentManagerSheet(model: model, account: account)
-        }
     }
 
     private var infoGrid: some View {
@@ -467,10 +461,10 @@ private struct AccountDetailView: View {
     }
 
     private var credentialSummaryLabel: String {
-        switch account.authKind {
-        case .chatgpt:
+        switch account.providerRule {
+        case .chatgptOAuth:
             return L10n.tr("邮箱")
-        case .openAIAPIKey, .anthropicAPIKey:
+        case .openAICompatible, .claudeCompatible:
             return L10n.tr("Key 摘要")
         case .claudeProfile:
             return L10n.tr("Profile")
@@ -478,23 +472,23 @@ private struct AccountDetailView: View {
     }
 
     private var credentialSummaryValue: String {
-        switch account.authKind {
+        switch account.providerRule {
         case .claudeProfile:
             return L10n.tr("本地快照")
-        case .chatgpt, .openAIAPIKey, .anthropicAPIKey:
+        case .chatgptOAuth, .openAICompatible, .claudeCompatible:
             return account.email ?? L10n.tr("未解析")
         }
     }
 
     private var codexUsageStatusText: String? {
-        if account.platform != .codex || account.authKind == .openAIAPIKey {
+        if account.providerRule != .chatgptOAuth {
             return nil
         }
         return account.subscriptionDetails?.usageStatusText
     }
 
     private var codexAvailabilityText: String? {
-        if account.platform != .codex || account.authKind == .openAIAPIKey {
+        if account.providerRule != .chatgptOAuth {
             return nil
         }
         guard let details = account.subscriptionDetails, details.allowed != nil else {
@@ -504,7 +498,7 @@ private struct AccountDetailView: View {
     }
 
     private var codexLimitStatusText: String? {
-        if account.platform != .codex || account.authKind == .openAIAPIKey {
+        if account.providerRule != .chatgptOAuth {
             return nil
         }
         guard let details = account.subscriptionDetails, details.limitReached != nil else {
@@ -615,7 +609,7 @@ private struct AccountDetailView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(account.isActive || model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
 
-                if account.platform == .codex {
+                if account.providerRule == .chatgptOAuth {
                     Button(isolatedInstanceButtonTitle) {
                         Task { await model.launchIsolatedCodex(for: account) }
                     }
@@ -650,28 +644,23 @@ private struct AccountDetailView: View {
             }
 
             HStack(alignment: .center, spacing: 12) {
-                Text(L10n.tr("默认 CLI 环境"))
+                Text(L10n.tr("默认启动目标"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                 Picker(
-                    L10n.tr("默认 CLI 环境"),
+                    L10n.tr("默认启动目标"),
                     selection: Binding(
-                        get: { model.defaultCLIEnvironmentID(for: account.id) ?? selectedCLIEnvironment.id },
-                        set: { model.setDefaultCLIEnvironmentID($0, for: account.id) }
+                        get: { model.defaultCLITarget(for: account) },
+                        set: { model.setDefaultCLITarget($0, for: account.id) }
                     )
                 ) {
-                    ForEach(model.cliEnvironmentProfiles) { profile in
-                        Text("\(profile.sanitizedDisplayName) · \(profile.target.displayName)")
-                            .tag(profile.id)
+                    ForEach(account.allowedCLITargets) { target in
+                        Text(target.displayName)
+                            .tag(target)
                     }
                 }
-                .frame(maxWidth: 320)
-
-                Button(L10n.tr("管理 CLI 环境")) {
-                    isManagingCLIEnvironments = true
-                }
-                .buttonStyle(.bordered)
+                .frame(maxWidth: 240)
             }
 
             Text(cliLaunchHelpText)
@@ -738,34 +727,31 @@ private struct AccountDetailView: View {
     }
 
     private var cliLaunchHelpText: String {
-        switch selectedCLIEnvironment.target {
+        switch selectedCLITarget {
         case .claude:
-            switch selectedCLIEnvironment.resolvedClaude.providerSource {
-            case .accountCredentials:
-                if account.platform == .codex {
-                    return L10n.tr("打开 CLI 会启动应用生成的 Claude Code patched runtime；当前账号是 Codex 时，即使环境显示为 Claude 凭据模式，也会直接复用该账号当前的 Codex OAuth 或 API Key 启动，不要求 Claude 登录，也不需要额外填写 Base URL 或 API Key。")
-                }
-                return L10n.tr("打开 CLI 会按当前默认环境启动 Claude Code；此模式会沿用 Claude 账号凭据或 Anthropic API Key。")
-            case .explicitProvider:
-                return L10n.tr("打开 CLI 会启动应用生成的 Claude Code patched runtime；此模式不会要求 Claude 登录，若 provider 配置不完整会直接报错。")
-            case .inheritCodexEnvironment:
-                if account.platform == .codex {
-                    return L10n.tr("打开 CLI 会启动应用生成的 Claude Code patched runtime；当前账号是 Codex 时，会默认继承该账号的 Codex 环境启动。若来源环境本身使用当前账号凭据，会直接复用当前 Codex OAuth 或 API Key，不要求 Claude 登录，也不需要手动填写 Base URL 或 API Key。")
-                }
-                return L10n.tr("打开 CLI 会启动应用生成的 Claude Code patched runtime；此模式不会要求 Claude 登录。当前账号不是 Codex 时，需要在环境里手动指定一个覆盖来源 Codex 环境。")
+            switch account.providerRule {
+            case .claudeProfile:
+                return L10n.tr("打开 CLI 会直接复用当前账号保存的 Claude Profile。")
+            case .claudeCompatible:
+                return L10n.tr("打开 CLI 会按当前账号的 Claude 兼容 provider、模型和 API Key 启动 Claude Code。")
+            case .chatgptOAuth, .openAICompatible:
+                return L10n.tr("打开 CLI 会启动应用生成的 Claude Code patched runtime，并自动桥接当前账号的 OpenAI 兼容凭据。")
             }
         case .codex:
-            if account.platform != .codex {
-                return L10n.tr("打开 CLI 会按当前默认环境启动 Codex CLI；如果该环境未使用账号凭据，应用会生成独立 CODEX_HOME 和配置文件。")
+            if !account.supportsCodexCLI {
+                return L10n.tr("当前账号不支持打开 Codex CLI。")
             }
             if model.hasLaunchedIsolatedInstance(for: account.id) {
                 return L10n.tr("该账号的独立实例已在当前会话中启动，为避免重复拉起，当前已禁用再次启动。")
             }
-            if account.isActive && account.authKind == .chatgpt && selectedCLIEnvironment.resolvedCodex.useAccountCredentials {
+            if account.isActive && account.providerRule == .chatgptOAuth {
                 return L10n.tr("打开 CLI 会直接使用当前 ~/.codex；当前活跃的 ChatGPT 账号不能再起独立实例，避免触发 refresh_token_reused。")
             }
-            if account.isActive && selectedCLIEnvironment.resolvedCodex.useAccountCredentials && !selectedCLIEnvironment.resolvedCodex.requiresConfigFile {
-                return L10n.tr("打开 CLI 会直接使用当前 ~/.codex；独立实例仍会使用独立 CODEX_HOME 和 user-data 目录启动，不会改写当前 ~/.codex。")
+            if account.providerRule == .openAICompatible {
+                return L10n.tr("打开 CLI 会为该账号生成独立 CODEX_HOME，并按账号里的 OpenAI 兼容 provider 配置启动。")
+            }
+            if account.providerRule == .claudeCompatible {
+                return L10n.tr("打开 CLI 会先桥接当前 Claude 兼容 provider，再用独立 CODEX_HOME 启动 Codex CLI。")
             }
             return L10n.tr("打开 CLI 时会为该账号使用独立 CODEX_HOME；独立实例也会使用独立 CODEX_HOME 和 user-data 目录启动，不会改写当前 ~/.codex。")
         }
@@ -781,8 +767,8 @@ private struct AccountDetailView: View {
         return L10n.tr("启动独立实例")
     }
 
-    private var selectedCLIEnvironment: CLIEnvironmentProfile {
-        model.defaultCLIEnvironment(for: account)
+    private var selectedCLITarget: CLIEnvironmentTarget {
+        model.defaultCLITarget(for: account)
     }
 
     private var recentCLILaunches: [CLILaunchRecord] {
@@ -795,8 +781,8 @@ private struct AccountDetailView: View {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
-        panel.prompt = L10n.tr("打开 %@", selectedCLIEnvironment.target.displayName)
-        panel.message = L10n.tr("选择一个目录作为 %@ 的启动目录。", selectedCLIEnvironment.target.displayName)
+        panel.prompt = L10n.tr("打开 %@", selectedCLITarget.displayName)
+        panel.message = L10n.tr("选择一个目录作为 %@ 的启动目录。", selectedCLITarget.displayName)
         if let path = recentCLILaunches.first?.path {
             panel.directoryURL = URL(fileURLWithPath: path, isDirectory: true)
         }
@@ -807,7 +793,7 @@ private struct AccountDetailView: View {
 
     private func launchCLI(in directoryURL: URL) {
         Task {
-            await model.openCLI(for: account, workingDirectoryURL: directoryURL)
+            await model.openCLI(for: account, target: selectedCLITarget, workingDirectoryURL: directoryURL)
         }
     }
 
@@ -815,7 +801,7 @@ private struct AccountDetailView: View {
         Task {
             await model.openCLI(
                 for: account,
-                environmentProfile: record.environmentSnapshot,
+                target: record.target,
                 workingDirectoryURL: URL(fileURLWithPath: record.path, isDirectory: true)
             )
         }
@@ -844,15 +830,15 @@ private struct AccountDetailView: View {
     }
 
     private var statusDescriptionText: String {
-        switch (account.platform, account.authKind) {
-        case (.codex, _):
+        switch account.providerRule {
+        case .chatgptOAuth:
             return L10n.tr("手动更新会在线刷新该账号凭据并同步在线额度；界面统一按剩余百分比展示。")
-        case (.claude, .claudeProfile):
+        case .claudeProfile:
             return L10n.tr("手动更新只记录本地 Claude Profile 状态，不会同步 claude.ai 登录态。")
-        case (.claude, .anthropicAPIKey):
+        case .claudeCompatible where account.providerPresetID == "anthropic":
             return L10n.tr("手动更新会向 Anthropic 发起极小探测请求，并读取响应头中的 requests 与 token 限额。")
-        case (.claude, _):
-            return L10n.tr("手动更新会刷新当前账号状态。")
+        case .openAICompatible, .claudeCompatible:
+            return L10n.tr("手动更新只确认当前 Provider API Key 的本地凭据是否可用。")
         }
     }
 
@@ -890,29 +876,18 @@ private struct CLIDirectoryHistoryCard: View {
                 }
 
                 HStack(spacing: 8) {
-                    Text(record.environmentDisplayName)
+                    Text(record.target.displayName)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(Color.accentColor)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background(Color.accentColor.opacity(0.12), in: Capsule())
-
-                    Text(record.environmentTarget.displayName)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
 
                 Text(record.path)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
-
-                if !record.environmentSummary.isEmpty {
-                    Text(record.environmentSummary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)

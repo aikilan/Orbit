@@ -366,31 +366,45 @@ struct CLIEnvironmentProfile: Codable, Equatable, Hashable, Identifiable, Sendab
 struct CLILaunchRecord: Codable, Equatable, Hashable, Identifiable, Sendable {
     var id: UUID
     var path: String
-    var environmentID: String
-    var environmentDisplayName: String
-    var environmentTarget: CLIEnvironmentTarget
-    var environmentSummary: String
-    var environmentSnapshot: CLIEnvironmentProfile
+    var target: CLIEnvironmentTarget
     var lastUsedAt: Date
 
     init(
         id: UUID = UUID(),
         path: String,
-        environmentID: String,
-        environmentDisplayName: String,
-        environmentTarget: CLIEnvironmentTarget,
-        environmentSummary: String,
-        environmentSnapshot: CLIEnvironmentProfile,
+        target: CLIEnvironmentTarget,
         lastUsedAt: Date = Date()
     ) {
         self.id = id
         self.path = path
-        self.environmentID = environmentID
-        self.environmentDisplayName = environmentDisplayName
-        self.environmentTarget = environmentTarget
-        self.environmentSummary = environmentSummary
-        self.environmentSnapshot = environmentSnapshot
+        self.target = target
         self.lastUsedAt = lastUsedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case path
+        case target
+        case lastUsedAt
+        case environmentTarget
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        path = try container.decode(String.self, forKey: .path)
+        target = try container.decodeIfPresent(CLIEnvironmentTarget.self, forKey: .target)
+            ?? container.decodeIfPresent(CLIEnvironmentTarget.self, forKey: .environmentTarget)
+            ?? .codex
+        lastUsedAt = try container.decodeIfPresent(Date.self, forKey: .lastUsedAt) ?? Date()
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(path, forKey: .path)
+        try container.encode(target, forKey: .target)
+        try container.encode(lastUsedAt, forKey: .lastUsedAt)
     }
 }
 

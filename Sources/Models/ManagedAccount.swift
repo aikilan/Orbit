@@ -58,6 +58,13 @@ struct ManagedAccount: Identifiable, Codable, Hashable, Sendable {
     var displayName: String
     var email: String?
     var authKind: ManagedAuthKind
+    var providerRule: ProviderRule
+    var providerPresetID: String?
+    var providerDisplayName: String?
+    var providerBaseURL: String?
+    var providerAPIKeyEnvName: String?
+    var defaultModel: String?
+    var defaultCLITarget: CLIEnvironmentTarget
     var createdAt: Date
     var lastUsedAt: Date?
     var lastQuotaSnapshotAt: Date?
@@ -76,6 +83,13 @@ struct ManagedAccount: Identifiable, Codable, Hashable, Sendable {
         displayName: String,
         email: String?,
         authKind: ManagedAuthKind,
+        providerRule: ProviderRule? = nil,
+        providerPresetID: String? = nil,
+        providerDisplayName: String? = nil,
+        providerBaseURL: String? = nil,
+        providerAPIKeyEnvName: String? = nil,
+        defaultModel: String? = nil,
+        defaultCLITarget: CLIEnvironmentTarget? = nil,
         createdAt: Date,
         lastUsedAt: Date?,
         lastQuotaSnapshotAt: Date?,
@@ -93,6 +107,13 @@ struct ManagedAccount: Identifiable, Codable, Hashable, Sendable {
         self.displayName = displayName
         self.email = email
         self.authKind = authKind
+        self.providerRule = providerRule ?? Self.legacyProviderRule(for: authKind)
+        self.providerPresetID = providerPresetID
+        self.providerDisplayName = providerDisplayName
+        self.providerBaseURL = providerBaseURL
+        self.providerAPIKeyEnvName = providerAPIKeyEnvName
+        self.defaultModel = defaultModel
+        self.defaultCLITarget = defaultCLITarget ?? (providerRule ?? Self.legacyProviderRule(for: authKind)).defaultTarget
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
         self.lastQuotaSnapshotAt = lastQuotaSnapshotAt
@@ -107,6 +128,55 @@ struct ManagedAccount: Identifiable, Codable, Hashable, Sendable {
 }
 
 extension ManagedAccount {
+    var resolvedProviderDisplayName: String {
+        ProviderCatalog.providerDisplayName(
+            presetID: providerPresetID,
+            fallbackDisplayName: providerDisplayName,
+            fallbackRule: providerRule
+        )
+    }
+
+    var resolvedProviderBaseURL: String {
+        let trimmed = providerBaseURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.isEmpty {
+            return trimmed
+        }
+        return ProviderCatalog.preset(id: providerPresetID)?.baseURL ?? ""
+    }
+
+    var resolvedProviderAPIKeyEnvName: String {
+        let trimmed = providerAPIKeyEnvName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.isEmpty {
+            return trimmed
+        }
+        return ProviderCatalog.preset(id: providerPresetID)?.apiKeyEnvName ?? ""
+    }
+
+    var resolvedDefaultModel: String {
+        let trimmed = defaultModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.isEmpty {
+            return trimmed
+        }
+        return ProviderCatalog.preset(id: providerPresetID)?.defaultModel ?? ""
+    }
+
+    var allowedCLITargets: [CLIEnvironmentTarget] {
+        switch providerRule {
+        case .chatgptOAuth, .openAICompatible, .claudeCompatible:
+            return [.codex, .claude]
+        case .claudeProfile:
+            return [.claude]
+        }
+    }
+
+    var supportsCodexCLI: Bool {
+        allowedCLITargets.contains(.codex)
+    }
+
+    var supportsClaudeCLI: Bool {
+        allowedCLITargets.contains(.claude)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id
         case platform
@@ -114,6 +184,13 @@ extension ManagedAccount {
         case displayName
         case email
         case authKind
+        case providerRule
+        case providerPresetID
+        case providerDisplayName
+        case providerBaseURL
+        case providerAPIKeyEnvName
+        case defaultModel
+        case defaultCLITarget
         case createdAt
         case lastUsedAt
         case lastQuotaSnapshotAt
@@ -138,6 +215,15 @@ extension ManagedAccount {
         self.email = try container.decodeIfPresent(String.self, forKey: .email)
         self.authKind = try container.decodeIfPresent(ManagedAuthKind.self, forKey: .authKind)
             ?? container.decode(ManagedAuthKind.self, forKey: .authMode)
+        self.providerRule = try container.decodeIfPresent(ProviderRule.self, forKey: .providerRule)
+            ?? Self.legacyProviderRule(for: authKind)
+        self.providerPresetID = try container.decodeIfPresent(String.self, forKey: .providerPresetID)
+        self.providerDisplayName = try container.decodeIfPresent(String.self, forKey: .providerDisplayName)
+        self.providerBaseURL = try container.decodeIfPresent(String.self, forKey: .providerBaseURL)
+        self.providerAPIKeyEnvName = try container.decodeIfPresent(String.self, forKey: .providerAPIKeyEnvName)
+        self.defaultModel = try container.decodeIfPresent(String.self, forKey: .defaultModel)
+        self.defaultCLITarget = try container.decodeIfPresent(CLIEnvironmentTarget.self, forKey: .defaultCLITarget)
+            ?? providerRule.defaultTarget
         self.createdAt = try container.decode(Date.self, forKey: .createdAt)
         self.lastUsedAt = try container.decodeIfPresent(Date.self, forKey: .lastUsedAt)
         self.lastQuotaSnapshotAt = try container.decodeIfPresent(Date.self, forKey: .lastQuotaSnapshotAt)
@@ -158,6 +244,13 @@ extension ManagedAccount {
         try container.encode(displayName, forKey: .displayName)
         try container.encodeIfPresent(email, forKey: .email)
         try container.encode(authKind, forKey: .authKind)
+        try container.encode(providerRule, forKey: .providerRule)
+        try container.encodeIfPresent(providerPresetID, forKey: .providerPresetID)
+        try container.encodeIfPresent(providerDisplayName, forKey: .providerDisplayName)
+        try container.encodeIfPresent(providerBaseURL, forKey: .providerBaseURL)
+        try container.encodeIfPresent(providerAPIKeyEnvName, forKey: .providerAPIKeyEnvName)
+        try container.encodeIfPresent(defaultModel, forKey: .defaultModel)
+        try container.encode(defaultCLITarget, forKey: .defaultCLITarget)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(lastUsedAt, forKey: .lastUsedAt)
         try container.encodeIfPresent(lastQuotaSnapshotAt, forKey: .lastQuotaSnapshotAt)
@@ -168,6 +261,21 @@ extension ManagedAccount {
         try container.encodeIfPresent(lastStatusMessage, forKey: .lastStatusMessage)
         try container.encodeIfPresent(lastStatusLevel, forKey: .lastStatusLevel)
         try container.encode(isActive, forKey: .isActive)
+    }
+
+    private static func legacyProviderRule(for authKind: ManagedAuthKind) -> ProviderRule {
+        switch authKind {
+        case .chatgpt:
+            return .chatgptOAuth
+        case .claudeProfile:
+            return .claudeProfile
+        case .openAIAPIKey:
+            return .openAICompatible
+        case .anthropicAPIKey:
+            return .claudeCompatible
+        case .providerAPIKey:
+            return .openAICompatible
+        }
     }
 }
 
@@ -204,13 +312,10 @@ struct AppDatabase: Codable, Sendable {
     var quotaSnapshots: [String: QuotaSnapshot]
     var claudeRateLimitSnapshots: [String: ClaudeRateLimitSnapshot]
     var switchLogs: [SwitchLogEntry]
-    var cliEnvironmentProfiles: [CLIEnvironmentProfile] = CLIEnvironmentProfile.builtInProfiles
-    var defaultCLIEnvironmentIDByAccountID: [String: String] = [:]
-    var preferredCodexEnvironmentIDByAccountID: [String: String] = [:]
     var cliLaunchHistoryByAccountID: [String: [CLILaunchRecord]] = [:]
     var activeAccountID: UUID?
 
-    static let currentVersion = 7
+    static let currentVersion = 8
 
     static let empty = AppDatabase(
         version: currentVersion,
@@ -218,9 +323,6 @@ struct AppDatabase: Codable, Sendable {
         quotaSnapshots: [:],
         claudeRateLimitSnapshots: [:],
         switchLogs: [],
-        cliEnvironmentProfiles: CLIEnvironmentProfile.builtInProfiles,
-        defaultCLIEnvironmentIDByAccountID: [:],
-        preferredCodexEnvironmentIDByAccountID: [:],
         cliLaunchHistoryByAccountID: [:],
         activeAccountID: nil
     )
@@ -246,27 +348,11 @@ struct AppDatabase: Codable, Sendable {
         cliLaunchHistoryByAccountID[accountID.uuidString] ?? []
     }
 
-    func defaultCLIEnvironmentID(for accountID: UUID) -> String? {
-        defaultCLIEnvironmentIDByAccountID[accountID.uuidString]
-    }
-
-    func preferredCodexEnvironmentID(for accountID: UUID) -> String? {
-        preferredCodexEnvironmentIDByAccountID[accountID.uuidString]
-    }
-
-    func cliEnvironmentProfile(id: String) -> CLIEnvironmentProfile? {
-        cliEnvironmentProfiles.first(where: { $0.id == id })
-    }
-
-    func defaultCLIEnvironment(for account: ManagedAccount) -> CLIEnvironmentProfile {
-        let defaultID = defaultCLIEnvironmentIDByAccountID[account.id.uuidString]
-            ?? CLIEnvironmentProfile.defaultProfileID(for: account.platform)
-        if let profile = cliEnvironmentProfile(id: defaultID) {
-            return profile
+    func defaultCLITarget(for account: ManagedAccount) -> CLIEnvironmentTarget {
+        if account.allowedCLITargets.contains(account.defaultCLITarget) {
+            return account.defaultCLITarget
         }
-        return cliEnvironmentProfiles.first(where: { $0.id == CLIEnvironmentProfile.defaultProfileID(for: account.platform) })
-            ?? CLIEnvironmentProfile.builtInProfiles.first(where: { $0.id == CLIEnvironmentProfile.defaultProfileID(for: account.platform) })
-            ?? CLIEnvironmentProfile.builtInProfiles[0]
+        return account.allowedCLITargets.first ?? .codex
     }
 
     mutating func setActiveAccount(_ id: UUID?) {
@@ -296,8 +382,6 @@ struct AppDatabase: Codable, Sendable {
         quotaSnapshots.removeValue(forKey: id.uuidString)
         claudeRateLimitSnapshots.removeValue(forKey: id.uuidString)
         cliLaunchHistoryByAccountID.removeValue(forKey: id.uuidString)
-        defaultCLIEnvironmentIDByAccountID.removeValue(forKey: id.uuidString)
-        preferredCodexEnvironmentIDByAccountID.removeValue(forKey: id.uuidString)
         if activeAccountID == id {
             activeAccountID = nil
         }
@@ -325,56 +409,28 @@ struct AppDatabase: Codable, Sendable {
         }
     }
 
-    mutating func upsertCLIEnvironmentProfile(_ profile: CLIEnvironmentProfile) {
-        if let index = cliEnvironmentProfiles.firstIndex(where: { $0.id == profile.id }) {
-            cliEnvironmentProfiles[index] = profile
-        } else {
-            cliEnvironmentProfiles.append(profile)
+    mutating func setDefaultCLITarget(_ target: CLIEnvironmentTarget, for accountID: UUID) {
+        guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
+            return
         }
-        cliEnvironmentProfiles = mergedCLIEnvironmentProfiles(cliEnvironmentProfiles)
-        normalizeCLIEnvironmentState()
-    }
-
-    mutating func removeCLIEnvironmentProfile(id: String) {
-        guard let profile = cliEnvironmentProfile(id: id), !profile.isBuiltIn else { return }
-        cliEnvironmentProfiles.removeAll(where: { $0.id == id })
-
-        for account in accounts {
-            let key = account.id.uuidString
-            if defaultCLIEnvironmentIDByAccountID[key] == id {
-                defaultCLIEnvironmentIDByAccountID[key] = CLIEnvironmentProfile.defaultProfileID(for: account.platform)
-            }
-            if preferredCodexEnvironmentIDByAccountID[key] == id {
-                preferredCodexEnvironmentIDByAccountID[key] = fallbackPreferredCodexEnvironmentID(for: account)
-            }
-        }
-        normalizeCLIEnvironmentState()
-    }
-
-    mutating func setDefaultCLIEnvironmentID(_ environmentID: String, for accountID: UUID) {
-        defaultCLIEnvironmentIDByAccountID[accountID.uuidString] = environmentID
-        if let profile = cliEnvironmentProfile(id: environmentID), profile.target == .codex {
-            preferredCodexEnvironmentIDByAccountID[accountID.uuidString] = environmentID
+        if accounts[index].allowedCLITargets.contains(target) {
+            accounts[index].defaultCLITarget = target
         }
     }
 
     mutating func rememberCLILaunch(
         _ directoryURL: URL,
-        environmentProfile: CLIEnvironmentProfile,
+        target: CLIEnvironmentTarget,
         for accountID: UUID
     ) {
         let normalizedPath = directoryURL.standardizedFileURL.path
         let key = accountID.uuidString
         var history = cliLaunchHistoryByAccountID[key] ?? []
-        history.removeAll(where: { $0.path == normalizedPath && $0.environmentID == environmentProfile.id })
+        history.removeAll(where: { $0.path == normalizedPath && $0.target == target })
         history.insert(
             CLILaunchRecord(
                 path: normalizedPath,
-                environmentID: environmentProfile.id,
-                environmentDisplayName: environmentProfile.sanitizedDisplayName,
-                environmentTarget: environmentProfile.target,
-                environmentSummary: environmentProfile.launchSummary,
-                environmentSnapshot: environmentProfile,
+                target: target,
                 lastUsedAt: Date()
             ),
             at: 0
@@ -386,56 +442,13 @@ struct AppDatabase: Codable, Sendable {
     }
 
     mutating func normalizeCLIEnvironmentState() {
-        cliEnvironmentProfiles = mergedCLIEnvironmentProfiles(cliEnvironmentProfiles)
-
         for account in accounts {
-            let key = account.id.uuidString
-            let defaultEnvironmentID = defaultCLIEnvironmentIDByAccountID[key]
-                ?? CLIEnvironmentProfile.defaultProfileID(for: account.platform)
-            if cliEnvironmentProfile(id: defaultEnvironmentID) == nil {
-                defaultCLIEnvironmentIDByAccountID[key] = CLIEnvironmentProfile.defaultProfileID(for: account.platform)
-            } else if defaultCLIEnvironmentIDByAccountID[key] == nil {
-                defaultCLIEnvironmentIDByAccountID[key] = defaultEnvironmentID
-            }
-
-            if codexEnvironmentProfile(id: preferredCodexEnvironmentIDByAccountID[key]) == nil {
-                preferredCodexEnvironmentIDByAccountID[key] = fallbackPreferredCodexEnvironmentID(for: account)
-            }
-        }
-    }
-
-    private func codexEnvironmentProfile(id: String?) -> CLIEnvironmentProfile? {
-        guard let id, let profile = cliEnvironmentProfile(id: id), profile.target == .codex else {
-            return nil
-        }
-        return profile
-    }
-
-    private func fallbackPreferredCodexEnvironmentID(for account: ManagedAccount) -> String {
-        let key = account.id.uuidString
-        if let defaultCodexEnvironment = codexEnvironmentProfile(id: defaultCLIEnvironmentIDByAccountID[key]) {
-            return defaultCodexEnvironment.id
-        }
-        return CLIEnvironmentProfile.builtInCodexProfileID
-    }
-
-    private func mergedCLIEnvironmentProfiles(_ profiles: [CLIEnvironmentProfile]) -> [CLIEnvironmentProfile] {
-        var merged = [String: CLIEnvironmentProfile]()
-        for profile in CLIEnvironmentProfile.builtInProfiles {
-            merged[profile.id] = profile
-        }
-        for profile in profiles {
-            if profile.isBuiltIn {
+            guard let index = accounts.firstIndex(where: { $0.id == account.id }) else {
                 continue
             }
-            merged[profile.id] = profile
-        }
-
-        return merged.values.sorted { lhs, rhs in
-            if lhs.isBuiltIn != rhs.isBuiltIn {
-                return lhs.isBuiltIn && !rhs.isBuiltIn
+            if !accounts[index].allowedCLITargets.contains(accounts[index].defaultCLITarget) {
+                accounts[index].defaultCLITarget = accounts[index].allowedCLITargets.first ?? .codex
             }
-            return lhs.sanitizedDisplayName.localizedCaseInsensitiveCompare(rhs.sanitizedDisplayName) == .orderedAscending
         }
     }
 }
@@ -447,12 +460,11 @@ extension AppDatabase {
         case quotaSnapshots
         case claudeRateLimitSnapshots
         case switchLogs
-        case cliEnvironmentProfiles
-        case defaultCLIEnvironmentIDByAccountID
-        case preferredCodexEnvironmentIDByAccountID
         case cliLaunchHistoryByAccountID
         case cliWorkingDirectoriesByAccountID
         case activeAccountID
+        case cliEnvironmentProfiles
+        case defaultCLIEnvironmentIDByAccountID
     }
 
     init(from decoder: any Decoder) throws {
@@ -465,20 +477,55 @@ extension AppDatabase {
         let cliEnvironmentProfiles = try container.decodeIfPresent([CLIEnvironmentProfile].self, forKey: .cliEnvironmentProfiles)
             ?? CLIEnvironmentProfile.builtInProfiles
         let defaultCLIEnvironmentIDByAccountID = try container.decodeIfPresent([String: String].self, forKey: .defaultCLIEnvironmentIDByAccountID) ?? [:]
-        let preferredCodexEnvironmentIDByAccountID = try container.decodeIfPresent([String: String].self, forKey: .preferredCodexEnvironmentIDByAccountID) ?? [:]
         let cliLaunchHistoryByAccountID = try container.decodeIfPresent([String: [CLILaunchRecord]].self, forKey: .cliLaunchHistoryByAccountID) ?? [:]
         let legacyCLIDirectories = try container.decodeIfPresent([String: [String]].self, forKey: .cliWorkingDirectoriesByAccountID) ?? [:]
         let activeAccountID = try container.decodeIfPresent(UUID.self, forKey: .activeAccountID)
 
+        let migratedAccounts = accounts.map { account -> ManagedAccount in
+            var migrated = account
+            if migrated.defaultModel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+                switch migrated.authKind {
+                case .openAIAPIKey:
+                    migrated.defaultModel = "gpt-5.4"
+                case .anthropicAPIKey:
+                    migrated.defaultModel = "claude-sonnet-4.5"
+                default:
+                    break
+                }
+            }
+            if migrated.authKind == .openAIAPIKey {
+                migrated.authKind = .providerAPIKey
+                migrated.providerRule = .openAICompatible
+                migrated.providerPresetID = migrated.providerPresetID ?? "openai"
+                migrated.providerDisplayName = migrated.providerDisplayName ?? "OpenAI"
+                migrated.providerBaseURL = migrated.providerBaseURL ?? "https://api.openai.com/v1"
+                migrated.providerAPIKeyEnvName = migrated.providerAPIKeyEnvName ?? "OPENAI_API_KEY"
+            } else if migrated.authKind == .anthropicAPIKey {
+                migrated.authKind = .providerAPIKey
+                migrated.providerRule = .claudeCompatible
+                migrated.providerPresetID = migrated.providerPresetID ?? "anthropic"
+                migrated.providerDisplayName = migrated.providerDisplayName ?? "Anthropic"
+                migrated.providerBaseURL = migrated.providerBaseURL ?? "https://api.anthropic.com/v1"
+                migrated.providerAPIKeyEnvName = migrated.providerAPIKeyEnvName ?? "ANTHROPIC_API_KEY"
+            }
+
+            if let environmentID = defaultCLIEnvironmentIDByAccountID[migrated.id.uuidString],
+               let profile = cliEnvironmentProfiles.first(where: { $0.id == environmentID }),
+               migrated.allowedCLITargets.contains(profile.target)
+            {
+                migrated.defaultCLITarget = profile.target
+            } else if !migrated.allowedCLITargets.contains(migrated.defaultCLITarget) {
+                migrated.defaultCLITarget = migrated.allowedCLITargets.first ?? migrated.defaultCLITarget
+            }
+            return migrated
+        }
+
         var database = AppDatabase(
             version: max(version, Self.currentVersion),
-            accounts: accounts,
+            accounts: migratedAccounts,
             quotaSnapshots: quotaSnapshots,
             claudeRateLimitSnapshots: claudeRateLimitSnapshots,
             switchLogs: switchLogs,
-            cliEnvironmentProfiles: cliEnvironmentProfiles,
-            defaultCLIEnvironmentIDByAccountID: defaultCLIEnvironmentIDByAccountID,
-            preferredCodexEnvironmentIDByAccountID: preferredCodexEnvironmentIDByAccountID,
             cliLaunchHistoryByAccountID: cliLaunchHistoryByAccountID,
             activeAccountID: activeAccountID
         )
@@ -486,15 +533,10 @@ extension AppDatabase {
         if database.cliLaunchHistoryByAccountID.isEmpty, !legacyCLIDirectories.isEmpty {
             for account in database.accounts {
                 let key = account.id.uuidString
-                let defaultEnvironment = database.defaultCLIEnvironment(for: account)
                 let legacyRecords = (legacyCLIDirectories[key] ?? []).map {
                     CLILaunchRecord(
                         path: $0,
-                        environmentID: defaultEnvironment.id,
-                        environmentDisplayName: defaultEnvironment.sanitizedDisplayName,
-                        environmentTarget: defaultEnvironment.target,
-                        environmentSummary: defaultEnvironment.launchSummary,
-                        environmentSnapshot: defaultEnvironment
+                        target: database.defaultCLITarget(for: account)
                     )
                 }
                 if !legacyRecords.isEmpty {
@@ -514,9 +556,6 @@ extension AppDatabase {
         try container.encode(quotaSnapshots, forKey: .quotaSnapshots)
         try container.encode(claudeRateLimitSnapshots, forKey: .claudeRateLimitSnapshots)
         try container.encode(switchLogs, forKey: .switchLogs)
-        try container.encode(cliEnvironmentProfiles, forKey: .cliEnvironmentProfiles)
-        try container.encode(defaultCLIEnvironmentIDByAccountID, forKey: .defaultCLIEnvironmentIDByAccountID)
-        try container.encode(preferredCodexEnvironmentIDByAccountID, forKey: .preferredCodexEnvironmentIDByAccountID)
         try container.encode(cliLaunchHistoryByAccountID, forKey: .cliLaunchHistoryByAccountID)
         try container.encodeIfPresent(activeAccountID, forKey: .activeAccountID)
     }

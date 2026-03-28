@@ -45,6 +45,11 @@ protocol ClaudePatchedRuntimeManaging: Sendable {
     ) throws -> URL
 }
 
+enum OpenAICompatibleClaudeBridgeSource: Equatable, Sendable {
+    case codexAuthPayload(CodexAuthPayload)
+    case provider(baseURL: String, apiKeyEnvName: String, apiKey: String)
+}
+
 struct PreparedCodexOAuthClaudeBridge: Equatable, Sendable {
     let baseURL: String
     let apiKeyEnvName: String
@@ -54,9 +59,25 @@ struct PreparedCodexOAuthClaudeBridge: Equatable, Sendable {
 protocol CodexOAuthClaudeBridgeManaging: Sendable {
     func prepareBridge(
         accountID: UUID,
-        payload: CodexAuthPayload,
+        source: OpenAICompatibleClaudeBridgeSource,
         model: String
     ) async throws -> PreparedCodexOAuthClaudeBridge
+}
+
+struct PreparedClaudeProviderCodexBridge: Equatable, Sendable {
+    let baseURL: String
+    let apiKeyEnvName: String
+    let apiKey: String
+}
+
+protocol ClaudeProviderCodexBridgeManaging: Sendable {
+    func prepareBridge(
+        accountID: UUID,
+        baseURL: String,
+        apiKeyEnvName: String,
+        apiKey: String,
+        model: String
+    ) async throws -> PreparedClaudeProviderCodexBridge
 }
 
 protocol QuotaMonitoring: AnyObject {
@@ -86,17 +107,15 @@ protocol CodexRuntimeInspecting: Sendable {
 protocol CLIEnvironmentResolving: Sendable {
     func resolveCodexContext(
         for account: ManagedAccount,
-        environmentProfile: CLIEnvironmentProfile,
         workingDirectoryURL: URL,
         appPaths: AppPaths,
-        authPayload: CodexAuthPayload?
-    ) throws -> ResolvedCodexCLILaunchContext
+        authPayload: CodexAuthPayload?,
+        providerAPIKeyCredential: ProviderAPIKeyCredential?,
+        claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging
+    ) async throws -> ResolvedCodexCLILaunchContext
 
     func resolveClaudeContext(
         for account: ManagedAccount,
-        environmentProfile: CLIEnvironmentProfile,
-        allEnvironmentProfiles: [CLIEnvironmentProfile],
-        preferredCodexEnvironmentID: String?,
         workingDirectoryURL: URL,
         appPaths: AppPaths,
         codexAuthPayload: CodexAuthPayload?,

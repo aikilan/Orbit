@@ -63,7 +63,7 @@ final class CodexOAuthClaudeBridgeManagerTests: XCTestCase {
         )
         let bridge = try await manager.prepareBridge(
             accountID: UUID(),
-            payload: CodexAuthPayload(authMode: .openAIAPIKey, openAIAPIKey: "sk-test"),
+            source: .codexAuthPayload(CodexAuthPayload(authMode: .openAIAPIKey, openAIAPIKey: "sk-test")),
             model: "gpt-5.4"
         )
 

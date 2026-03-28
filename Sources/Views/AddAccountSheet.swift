@@ -16,16 +16,19 @@ struct AddAccountSheet: View {
                 }
             }
 
-            Picker(L10n.tr("平台"), selection: $model.addAccountPlatform) {
-                ForEach(model.availablePlatforms) { platform in
-                    Text(platform.displayName).tag(platform)
+            Picker(L10n.tr("接入方式"), selection: $model.addAccountMode) {
+                ForEach(model.availableAddAccountModes) { mode in
+                    Text(mode.title).tag(mode)
                 }
             }
             .pickerStyle(.segmented)
-            .onChange(of: model.addAccountPlatform) { _, platform in
-                model.addAccountMode = AddAccountMode.modes(for: platform).first ?? .browser
+            .onChange(of: model.addAccountMode) { _, mode in
                 model.addAccountError = nil
-                model.addAccountStatus = model.selectedPlatformAddAccountMessage
+                model.addAccountStatus = model.selectedAddAccountMessage
+                if mode == .providerAPIKey {
+                    model.addAccountProviderRule = .openAICompatible
+                    model.applyProviderPreset(ProviderCatalog.preset(id: "openai"))
+                }
             }
             .onAppear {
                 model.prepareAddAccountSheet()
@@ -34,16 +37,7 @@ struct AddAccountSheet: View {
             Text(model.addAccountStatus)
                 .foregroundStyle(.secondary)
 
-            if model.availableAddAccountModes.count > 1 {
-                Picker(L10n.tr("登录方式"), selection: $model.addAccountMode) {
-                    ForEach(model.availableAddAccountModes) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
-            if model.addAccountPlatform == .codex, model.addAccountMode == .browser, let authorizeURL = model.browserAuthorizeURL {
+            if model.addAccountMode == .chatgptBrowser, let authorizeURL = model.browserAuthorizeURL {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(L10n.tr("浏览器 OAuth"))
                         .font(.headline)
@@ -73,21 +67,52 @@ struct AddAccountSheet: View {
                 .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
 
-            if model.addAccountPlatform == .codex, model.addAccountMode == .openAIAPIKey {
+            if model.addAccountMode == .providerAPIKey {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(L10n.tr("API Key 接入"))
+                    Text(L10n.tr("API Key Provider"))
                         .font(.headline)
-                    Text(L10n.tr("将 API Key 写入 `~/.codex/auth.json` 并缓存到本地账号库，后续可以像其它账号一样切换。"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+
+                    Picker(L10n.tr("规则"), selection: $model.addAccountProviderRule) {
+                        Text(ProviderRule.openAICompatible.displayName).tag(ProviderRule.openAICompatible)
+                        Text(ProviderRule.claudeCompatible.displayName).tag(ProviderRule.claudeCompatible)
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: model.addAccountProviderRule) { _, rule in
+                        let defaultPresetID = rule == .claudeCompatible ? "anthropic" : "openai"
+                        model.applyProviderPreset(ProviderCatalog.preset(id: defaultPresetID))
+                    }
+
+                    Picker(L10n.tr("Provider"), selection: $model.addAccountProviderPresetID) {
+                        ForEach(model.availableProviderPresets) { preset in
+                            Text(preset.displayName).tag(preset.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .onChange(of: model.addAccountProviderPresetID) { _, presetID in
+                        model.applyProviderPreset(ProviderCatalog.preset(id: presetID))
+                    }
 
                     TextField(L10n.tr("显示名称（可选）"), text: $model.apiKeyDisplayName)
                         .textFieldStyle(.roundedBorder)
 
-                    SecureField(L10n.tr("输入 OPENAI_API_KEY"), text: $model.apiKeyInput)
+                    TextField(L10n.tr("Provider 名称"), text: $model.addAccountProviderDisplayName)
                         .textFieldStyle(.roundedBorder)
 
-                    Text(L10n.tr("会按官方 CLI 当前写法生成 `auth.json`：仅包含 `OPENAI_API_KEY`。"))
+                    TextField(L10n.tr("默认模型"), text: $model.addAccountDefaultModel)
+                        .textFieldStyle(.roundedBorder)
+
+                    SecureField(L10n.tr("输入 API Key"), text: $model.apiKeyInput)
+                        .textFieldStyle(.roundedBorder)
+
+                    TextField(L10n.tr("Base URL"), text: $model.addAccountProviderBaseURL)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(model.selectedProviderPreset?.isCustom == false)
+
+                    TextField(L10n.tr("API Key 环境变量"), text: $model.addAccountProviderAPIKeyEnvName)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(model.selectedProviderPreset?.isCustom == false)
+
+                    Text(L10n.tr("保存后账号本身就是唯一权限来源。打开 CLI 时，应用会按账号配置自动决定 provider、模型和桥接方式。"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -96,7 +121,7 @@ struct AddAccountSheet: View {
                 .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
 
-            if model.addAccountPlatform == .claude, model.addAccountMode == .claudeProfile {
+            if model.addAccountMode == .claudeProfile {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(L10n.tr("导入当前 Claude Profile"))
                         .font(.headline)
@@ -116,29 +141,6 @@ struct AddAccountSheet: View {
                 .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
 
-            if model.addAccountPlatform == .claude, model.addAccountMode == .anthropicAPIKey {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(L10n.tr("Anthropic API Key"))
-                        .font(.headline)
-                    Text(L10n.tr("保存 Anthropic API Key。切换后仅影响应用内当前账号与从应用启动的 Claude CLI。"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    TextField(L10n.tr("显示名称（可选）"), text: $model.apiKeyDisplayName)
-                        .textFieldStyle(.roundedBorder)
-
-                    SecureField(L10n.tr("输入 ANTHROPIC_API_KEY"), text: $model.apiKeyInput)
-                        .textFieldStyle(.roundedBorder)
-
-                    Text(L10n.tr("手动更新状态时会向 Anthropic 发起极小探测请求，以读取限额响应头。"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            }
-
             if let error = model.addAccountError {
                 Text(error)
                     .foregroundStyle(.red)
@@ -154,25 +156,13 @@ struct AddAccountSheet: View {
                 Spacer()
                 Button(actionButtonTitle) {
                     Task {
-                        switch model.addAccountPlatform {
-                        case .codex:
-                            switch model.addAccountMode {
-                            case .browser:
-                                await model.startBrowserLogin()
-                            case .openAIAPIKey:
-                                await model.startAPIKeyLogin()
-                            case .claudeProfile, .anthropicAPIKey:
-                                break
-                            }
-                        case .claude:
-                            switch model.addAccountMode {
-                            case .claudeProfile:
-                                await model.importClaudeProfile()
-                            case .anthropicAPIKey:
-                                await model.startAPIKeyLogin()
-                            case .browser, .openAIAPIKey:
-                                break
-                            }
+                        switch model.addAccountMode {
+                        case .chatgptBrowser:
+                            await model.startBrowserLogin()
+                        case .providerAPIKey:
+                            await model.startAPIKeyLogin()
+                        case .claudeProfile:
+                            await model.importClaudeProfile()
                         }
                     }
                 }
@@ -184,17 +174,13 @@ struct AddAccountSheet: View {
     }
 
     private var actionButtonTitle: String {
-        switch (model.addAccountPlatform, model.addAccountMode) {
-        case (.codex, .browser):
+        switch model.addAccountMode {
+        case .chatgptBrowser:
             return L10n.tr("开始浏览器登录")
-        case (.codex, .openAIAPIKey):
-            return L10n.tr("保存并激活 API Key")
-        case (.claude, .claudeProfile):
+        case .providerAPIKey:
+            return L10n.tr("保存并激活 Provider")
+        case .claudeProfile:
             return L10n.tr("导入并激活 Claude Profile")
-        case (.claude, .anthropicAPIKey):
-            return L10n.tr("保存并激活 Anthropic API Key")
-        default:
-            return L10n.tr("新增账号")
         }
     }
 }

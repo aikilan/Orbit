@@ -71,17 +71,27 @@ final class PlatformFoundationTests: XCTestCase {
 
         XCTAssertEqual(history.count, 1)
         XCTAssertEqual(history.first?.path, path)
-        XCTAssertEqual(history.first?.environmentID, CLIEnvironmentProfile.builtInCodexProfileID)
-        XCTAssertEqual(history.first?.environmentTarget, .codex)
-        XCTAssertEqual(database.defaultCLIEnvironmentID(for: accountID), CLIEnvironmentProfile.builtInCodexProfileID)
-        XCTAssertEqual(database.preferredCodexEnvironmentID(for: accountID), CLIEnvironmentProfile.builtInCodexProfileID)
+        XCTAssertEqual(history.first?.target, .codex)
+        XCTAssertEqual(database.defaultCLITarget(for: try XCTUnwrap(database.account(id: accountID))), .codex)
     }
 
-    func testLegacyClaudeEnvironmentMigratesToProviderSource() throws {
+    func testLegacyDefaultEnvironmentMigratesToDefaultTarget() throws {
+        let accountID = UUID()
         let json = """
         {
           "version": 5,
-          "accounts": [],
+          "accounts": [
+            {
+              "id": "\(accountID.uuidString)",
+              "platform": "claude",
+              "accountIdentifier": "acct_legacy_claude",
+              "displayName": "Legacy Claude",
+              "email": null,
+              "authKind": "claude_profile",
+              "createdAt": "2026-03-25T10:00:00Z",
+              "isActive": false
+            }
+          ],
           "quotaSnapshots": {},
           "claudeRateLimitSnapshots": {},
           "switchLogs": [],
@@ -111,14 +121,69 @@ final class PlatformFoundationTests: XCTestCase {
         decoder.dateDecodingStrategy = .iso8601
 
         let database = try decoder.decode(AppDatabase.self, from: Data(json.utf8))
-        let environment = try XCTUnwrap(database.cliEnvironmentProfile(id: "legacy-claude-env"))
+        let account = try XCTUnwrap(database.account(id: accountID))
 
         XCTAssertEqual(database.version, AppDatabase.currentVersion)
-        XCTAssertEqual(environment.resolvedClaude.providerSource, .explicitProvider)
-        XCTAssertEqual(environment.resolvedClaude.trimmedModel, "claude-sonnet-4.5")
+        XCTAssertEqual(database.defaultCLITarget(for: account), .claude)
     }
 
-    func testPreferredCodexEnvironmentMigratesFromExistingDefaultCodexEnvironment() throws {
+    func testLegacyAPIKeyAccountsMigrateToProviderAccounts() throws {
+        let openAIAccountID = UUID()
+        let anthropicAccountID = UUID()
+        let json = """
+        {
+          "version": 7,
+          "accounts": [
+            {
+              "id": "\(openAIAccountID.uuidString)",
+              "platform": "codex",
+              "accountIdentifier": "acct_openai",
+              "displayName": "OpenAI Legacy",
+              "email": "sk-...openai",
+              "authKind": "api_key",
+              "createdAt": "2026-03-25T10:00:00Z",
+              "isActive": false
+            },
+            {
+              "id": "\(anthropicAccountID.uuidString)",
+              "platform": "claude",
+              "accountIdentifier": "acct_anthropic",
+              "displayName": "Anthropic Legacy",
+              "email": "sk-...anthropic",
+              "authKind": "anthropic_api_key",
+              "createdAt": "2026-03-25T10:00:00Z",
+              "isActive": false
+            }
+          ],
+          "quotaSnapshots": {},
+          "claudeRateLimitSnapshots": {},
+          "switchLogs": [],
+          "cliLaunchHistoryByAccountID": {},
+          "activeAccountID": null
+        }
+        """
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let database = try decoder.decode(AppDatabase.self, from: Data(json.utf8))
+        let openAIAccount = try XCTUnwrap(database.account(id: openAIAccountID))
+        let anthropicAccount = try XCTUnwrap(database.account(id: anthropicAccountID))
+
+        XCTAssertEqual(openAIAccount.authKind, .providerAPIKey)
+        XCTAssertEqual(openAIAccount.providerRule, .openAICompatible)
+        XCTAssertEqual(openAIAccount.providerPresetID, "openai")
+        XCTAssertEqual(openAIAccount.defaultModel, "gpt-5.4")
+        XCTAssertEqual(openAIAccount.defaultCLITarget, .codex)
+
+        XCTAssertEqual(anthropicAccount.authKind, .providerAPIKey)
+        XCTAssertEqual(anthropicAccount.providerRule, .claudeCompatible)
+        XCTAssertEqual(anthropicAccount.providerPresetID, "anthropic")
+        XCTAssertEqual(anthropicAccount.defaultModel, "claude-sonnet-4.5")
+        XCTAssertEqual(anthropicAccount.defaultCLITarget, .claude)
+    }
+
+    func testLegacyDefaultCodexEnvironmentMigratesToCodexTarget() throws {
         let accountID = UUID()
         let json = """
         {
@@ -171,10 +236,10 @@ final class PlatformFoundationTests: XCTestCase {
         decoder.dateDecodingStrategy = .iso8601
 
         let database = try decoder.decode(AppDatabase.self, from: Data(json.utf8))
+        let account = try XCTUnwrap(database.account(id: accountID))
 
         XCTAssertEqual(database.version, AppDatabase.currentVersion)
-        XCTAssertEqual(database.defaultCLIEnvironmentID(for: accountID), "custom-codex")
-        XCTAssertEqual(database.preferredCodexEnvironmentID(for: accountID), "custom-codex")
+        XCTAssertEqual(database.defaultCLITarget(for: account), .codex)
     }
 
     func testAppPathsMigratesLegacySupportDirectoryWhenNewDirectoryMissing() throws {

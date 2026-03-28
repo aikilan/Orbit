@@ -112,18 +112,8 @@ extension AppDatabase {
         activeAccountID: UUID? = nil
     ) {
         let launchHistory = Dictionary(uniqueKeysWithValues: accounts.map { account in
-            let profile = CLIEnvironmentProfile.builtInProfiles.first(where: {
-                $0.id == CLIEnvironmentProfile.defaultProfileID(for: account.platform)
-            }) ?? CLIEnvironmentProfile.builtInProfiles[0]
             let records = (cliWorkingDirectoriesByAccountID[account.id.uuidString] ?? []).map {
-                CLILaunchRecord(
-                    path: $0,
-                    environmentID: profile.id,
-                    environmentDisplayName: profile.sanitizedDisplayName,
-                    environmentTarget: profile.target,
-                    environmentSummary: profile.launchSummary,
-                    environmentSnapshot: profile
-                )
+                CLILaunchRecord(path: $0, target: account.defaultCLITarget)
             }
             return (account.id.uuidString, records)
         })
@@ -133,10 +123,6 @@ extension AppDatabase {
             quotaSnapshots: quotaSnapshots,
             claudeRateLimitSnapshots: [:],
             switchLogs: switchLogs,
-            cliEnvironmentProfiles: CLIEnvironmentProfile.builtInProfiles,
-            defaultCLIEnvironmentIDByAccountID: Dictionary(uniqueKeysWithValues: accounts.map {
-                ($0.id.uuidString, CLIEnvironmentProfile.defaultProfileID(for: $0.platform))
-            }),
             cliLaunchHistoryByAccountID: launchHistory,
             activeAccountID: activeAccountID
         )
@@ -175,13 +161,29 @@ private struct NoopClaudePatchedRuntimeManager: ClaudePatchedRuntimeManaging {
 private struct NoopCodexOAuthClaudeBridgeManager: CodexOAuthClaudeBridgeManaging {
     func prepareBridge(
         accountID: UUID,
-        payload: CodexAuthPayload,
+        source: OpenAICompatibleClaudeBridgeSource,
         model: String
     ) async throws -> PreparedCodexOAuthClaudeBridge {
         PreparedCodexOAuthClaudeBridge(
             baseURL: "http://127.0.0.1:18080",
             apiKeyEnvName: "ANTHROPIC_API_KEY",
             apiKey: "codex-oauth-bridge"
+        )
+    }
+}
+
+private struct NoopClaudeProviderCodexBridgeManager: ClaudeProviderCodexBridgeManaging {
+    func prepareBridge(
+        accountID: UUID,
+        baseURL: String,
+        apiKeyEnvName: String,
+        apiKey: String,
+        model: String
+    ) async throws -> PreparedClaudeProviderCodexBridge {
+        PreparedClaudeProviderCodexBridge(
+            baseURL: "http://127.0.0.1:18081",
+            apiKeyEnvName: "OPENAI_API_KEY",
+            apiKey: "claude-provider-bridge"
         )
     }
 }
@@ -203,6 +205,7 @@ extension AppViewModel {
         claudeCLILauncher: any ClaudeCLILaunching = NoopClaudeCLILauncher(),
         claudePatchedRuntimeManager: any ClaudePatchedRuntimeManaging = NoopClaudePatchedRuntimeManager(),
         codexOAuthClaudeBridgeManager: any CodexOAuthClaudeBridgeManaging = NoopCodexOAuthClaudeBridgeManager(),
+        claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging = NoopClaudeProviderCodexBridgeManager(),
         bannerAutoDismissDuration: Duration = .seconds(10)
     ) {
         self.init(
@@ -223,6 +226,7 @@ extension AppViewModel {
             claudeCLILauncher: claudeCLILauncher,
             claudePatchedRuntimeManager: claudePatchedRuntimeManager,
             codexOAuthClaudeBridgeManager: codexOAuthClaudeBridgeManager,
+            claudeProviderCodexBridgeManager: claudeProviderCodexBridgeManager,
             bannerAutoDismissDuration: bannerAutoDismissDuration
         )
     }

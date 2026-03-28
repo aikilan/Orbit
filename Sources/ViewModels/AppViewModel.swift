@@ -59,32 +59,20 @@ struct LowQuotaSwitchRecommendation: Equatable, Sendable {
 }
 
 enum AddAccountMode: String, CaseIterable, Identifiable {
-    case browser
-    case openAIAPIKey
+    case chatgptBrowser
     case claudeProfile
-    case anthropicAPIKey
+    case providerAPIKey
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .browser:
-            return L10n.tr("浏览器登录")
-        case .openAIAPIKey:
-            return L10n.tr("OpenAI API Key")
+        case .chatgptBrowser:
+            return L10n.tr("ChatGPT 浏览器登录")
         case .claudeProfile:
             return L10n.tr("导入当前 Claude Profile")
-        case .anthropicAPIKey:
-            return L10n.tr("Anthropic API Key")
-        }
-    }
-
-    static func modes(for platform: PlatformKind) -> [AddAccountMode] {
-        switch platform {
-        case .codex:
-            return [.browser, .openAIAPIKey]
-        case .claude:
-            return [.claudeProfile, .anthropicAPIKey]
+        case .providerAPIKey:
+            return L10n.tr("API Key Provider")
         }
     }
 }
@@ -100,15 +88,20 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var database: AppDatabase = .empty
     @Published var selectedAccountID: UUID?
     @Published private(set) var languagePreference = L10n.currentLanguagePreference
-    @Published var addAccountPlatform: PlatformKind = .codex
-    @Published var addAccountMode: AddAccountMode = .browser
-    @Published var addAccountStatus = L10n.tr("选择浏览器登录或 API Key 接入方式。")
+    @Published var addAccountMode: AddAccountMode = .chatgptBrowser
+    @Published var addAccountStatus = L10n.tr("选择账号接入方式。")
     @Published var addAccountError: String?
     @Published var isAuthenticating = false
     @Published var browserAuthorizeURL: URL?
     @Published var browserCallbackInput = ""
     @Published var apiKeyInput = ""
     @Published var apiKeyDisplayName = ""
+    @Published var addAccountProviderRule: ProviderRule = .openAICompatible
+    @Published var addAccountProviderPresetID = "openai"
+    @Published var addAccountProviderDisplayName = ""
+    @Published var addAccountProviderBaseURL = "https://api.openai.com/v1"
+    @Published var addAccountProviderAPIKeyEnvName = "OPENAI_API_KEY"
+    @Published var addAccountDefaultModel = "gpt-5.4"
     @Published var banner: BannerState?
     @Published var pendingDeleteAccountID: UUID?
     @Published private(set) var refreshingAccountIDs: Set<UUID> = []
@@ -142,6 +135,7 @@ final class AppViewModel: ObservableObject {
     private let claudeCLILauncher: any ClaudeCLILaunching
     private let claudePatchedRuntimeManager: any ClaudePatchedRuntimeManaging
     private let codexOAuthClaudeBridgeManager: any CodexOAuthClaudeBridgeManaging
+    private let claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging
     private let runtimes: [PlatformKind: any PlatformRuntime]
     private let bannerAutoDismissDuration: Duration
     private var browserSession: BrowserOAuthSession?
@@ -171,6 +165,7 @@ final class AppViewModel: ObservableObject {
         claudeCLILauncher: any ClaudeCLILaunching = ClaudeCLILauncher(),
         claudePatchedRuntimeManager: any ClaudePatchedRuntimeManaging = ClaudePatchedRuntimeManager(),
         codexOAuthClaudeBridgeManager: any CodexOAuthClaudeBridgeManaging = CodexOAuthClaudeBridgeManager(),
+        claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging = ClaudeProviderCodexBridgeManager(),
         platformRuntimes: [any PlatformRuntime] = [CodexPlatformRuntime(), ClaudePlatformRuntime()],
         bannerAutoDismissDuration: Duration = .seconds(10)
     ) {
@@ -191,6 +186,7 @@ final class AppViewModel: ObservableObject {
         self.claudeCLILauncher = claudeCLILauncher
         self.claudePatchedRuntimeManager = claudePatchedRuntimeManager
         self.codexOAuthClaudeBridgeManager = codexOAuthClaudeBridgeManager
+        self.claudeProviderCodexBridgeManager = claudeProviderCodexBridgeManager
         self.runtimes = Dictionary(uniqueKeysWithValues: platformRuntimes.map { ($0.platform, $0) })
         self.bannerAutoDismissDuration = bannerAutoDismissDuration
     }
@@ -231,6 +227,7 @@ final class AppViewModel: ObservableObject {
                 claudeCLILauncher: ClaudeCLILauncher(),
                 claudePatchedRuntimeManager: ClaudePatchedRuntimeManager(),
                 codexOAuthClaudeBridgeManager: CodexOAuthClaudeBridgeManager(),
+                claudeProviderCodexBridgeManager: ClaudeProviderCodexBridgeManager(),
                 platformRuntimes: [CodexPlatformRuntime(), ClaudePlatformRuntime()]
             )
         } catch {
@@ -291,26 +288,39 @@ final class AppViewModel: ObservableObject {
         return unsupportedMessage(for: focusedPlatform)
     }
 
-    var selectedPlatformAddAccountMessage: String {
-        addAccountMessage(for: addAccountPlatform, mode: addAccountMode)
+    var selectedAddAccountMessage: String {
+        addAccountMessage(for: addAccountMode)
     }
 
     var availableAddAccountModes: [AddAccountMode] {
-        AddAccountMode.modes(for: addAccountPlatform)
-    }
-
-    var defaultAddAccountPlatform: PlatformKind {
-        selectedAccount?.platform ?? .codex
+        AddAccountMode.allCases
     }
 
     var canAddAccounts: Bool {
-        availablePlatforms.contains {
-            (runtimes[$0]?.capabilities ?? .placeholder).supportsAccountAddition
-        }
+        true
     }
 
     var canAddAccountsInSheet: Bool {
-        (runtimes[addAccountPlatform]?.capabilities ?? .placeholder).supportsAccountAddition
+        true
+    }
+
+    var availableProviderPresets: [ProviderPreset] {
+        ProviderCatalog.presets(for: addAccountProviderRule)
+    }
+
+    var selectedProviderPreset: ProviderPreset? {
+        ProviderCatalog.preset(id: addAccountProviderPresetID)
+    }
+
+    func defaultCLITarget(for account: ManagedAccount) -> CLIEnvironmentTarget {
+        database.defaultCLITarget(for: account)
+    }
+
+    func setDefaultCLITarget(_ target: CLIEnvironmentTarget, for accountID: UUID) {
+        database.setDefaultCLITarget(target, for: accountID)
+        Task {
+            try? await persistDatabase()
+        }
     }
 
     func isRefreshingStatus(for accountID: UUID) -> Bool {
@@ -338,7 +348,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func canLaunchIsolatedCodex(for account: ManagedAccount) -> Bool {
-        guard account.platform == .codex else { return false }
+        guard account.providerRule == .chatgptOAuth else { return false }
         return !(account.isActive && account.authKind == .chatgpt) && !hasLaunchedIsolatedInstance(for: account.id)
     }
 
@@ -362,42 +372,6 @@ final class AppViewModel: ObservableObject {
         database.cliLaunchHistory(for: accountID)
     }
 
-    var cliEnvironmentProfiles: [CLIEnvironmentProfile] {
-        database.cliEnvironmentProfiles
-    }
-
-    func defaultCLIEnvironment(for account: ManagedAccount) -> CLIEnvironmentProfile {
-        database.defaultCLIEnvironment(for: account)
-    }
-
-    func defaultCLIEnvironmentID(for accountID: UUID) -> String? {
-        database.defaultCLIEnvironmentID(for: accountID)
-    }
-
-    func setDefaultCLIEnvironmentID(_ environmentID: String, for accountID: UUID) {
-        guard database.cliEnvironmentProfile(id: environmentID) != nil else { return }
-        database.setDefaultCLIEnvironmentID(environmentID, for: accountID)
-        Task {
-            try? await persistDatabase()
-        }
-    }
-
-    func saveCLIEnvironmentProfile(_ profile: CLIEnvironmentProfile) {
-        var savedProfile = profile
-        savedProfile.displayName = savedProfile.sanitizedDisplayName
-        database.upsertCLIEnvironmentProfile(savedProfile)
-        Task {
-            try? await persistDatabase()
-        }
-    }
-
-    func deleteCLIEnvironmentProfile(id: String) {
-        database.removeCLIEnvironmentProfile(id: id)
-        Task {
-            try? await persistDatabase()
-        }
-    }
-
     func shouldOfferRestartCodex(for account: ManagedAccount) -> Bool {
         restartRecommendedAccountID == account.id && runtimeInspector.isCodexDesktopRunning()
     }
@@ -412,9 +386,10 @@ final class AppViewModel: ObservableObject {
     }
 
     func prepareAddAccountSheet() {
-        addAccountPlatform = defaultAddAccountPlatform
-        addAccountMode = AddAccountMode.modes(for: addAccountPlatform).first ?? .browser
-        addAccountStatus = selectedPlatformAddAccountMessage
+        addAccountMode = .chatgptBrowser
+        addAccountProviderRule = .openAICompatible
+        applyProviderPreset(ProviderCatalog.preset(id: "openai"))
+        addAccountStatus = selectedAddAccountMessage
     }
 
     func updateLanguagePreference(_ preference: AppLanguagePreference) {
@@ -423,7 +398,7 @@ final class AppViewModel: ObservableObject {
         languagePreference = preference
 
         if browserSession == nil, !isAuthenticating, addAccountError == nil {
-            addAccountStatus = selectedPlatformAddAccountMessage
+            addAccountStatus = selectedAddAccountMessage
         }
 
         (NSApp.delegate as? AppDelegate)?.refreshLocalization()
@@ -544,7 +519,7 @@ final class AppViewModel: ObservableObject {
 
     func openCLI(
         for account: ManagedAccount,
-        environmentProfile: CLIEnvironmentProfile? = nil,
+        target: CLIEnvironmentTarget? = nil,
         workingDirectoryURL: URL
     ) async {
         guard launchingCLIAccountID == nil else { return }
@@ -555,30 +530,30 @@ final class AppViewModel: ObservableObject {
             }
         }
 
-        let resolvedEnvironment = environmentProfile ?? database.defaultCLIEnvironment(for: account)
+        let resolvedTarget = target ?? database.defaultCLITarget(for: account)
 
         do {
             try await openCLIImpl(
                 for: account,
-                environmentProfile: resolvedEnvironment,
+                target: resolvedTarget,
                 workingDirectoryURL: workingDirectoryURL
             )
             database.rememberCLILaunch(
                 workingDirectoryURL,
-                environmentProfile: resolvedEnvironment,
+                target: resolvedTarget,
                 for: account.id
             )
             try? await persistDatabase()
             let successMessage = L10n.tr(
                 "已为账号 %@ 打开 %@。",
                 account.displayName,
-                resolvedEnvironment.target.displayName
+                resolvedTarget.displayName
             )
             pushBanner(level: .info, message: successMessage)
         } catch {
             let errorMessage = L10n.tr(
                 "打开 %@ 失败：%@",
-                resolvedEnvironment.target.displayName,
+                resolvedTarget.displayName,
                 error.localizedDescription
             )
             pushBanner(level: .error, message: errorMessage)
@@ -586,11 +561,11 @@ final class AppViewModel: ObservableObject {
     }
 
     func openCodexCLI(for account: ManagedAccount, workingDirectoryURL: URL) async {
-        await openCLI(for: account, workingDirectoryURL: workingDirectoryURL)
+        await openCLI(for: account, target: .codex, workingDirectoryURL: workingDirectoryURL)
     }
 
     func launchIsolatedCodex(for account: ManagedAccount) async {
-        guard account.platform == .codex else {
+        guard account.providerRule == .chatgptOAuth else {
             pushBanner(level: .warning, message: unsupportedMessage(for: account.platform))
             return
         }
@@ -649,9 +624,9 @@ final class AppViewModel: ObservableObject {
     }
 
     func startBrowserLogin() async {
-        guard addAccountPlatform == .codex else {
+        guard addAccountMode == .chatgptBrowser else {
             addAccountError = nil
-            addAccountStatus = selectedPlatformAddAccountMessage
+            addAccountStatus = selectedAddAccountMessage
             return
         }
         addAccountError = nil
@@ -715,11 +690,15 @@ final class AppViewModel: ObservableObject {
         addAccountError = nil
         let apiKey = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let preferredDisplayName = apiKeyDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedModel = addAccountDefaultModel.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !apiKey.isEmpty else {
-            addAccountError = addAccountPlatform == .codex
-                ? L10n.tr("请输入 API Key。")
-                : L10n.tr("请输入 Anthropic API Key。")
+            addAccountError = L10n.tr("请输入 API Key。")
+            return
+        }
+
+        guard !trimmedModel.isEmpty else {
+            addAccountError = L10n.tr("请输入默认模型。")
             return
         }
 
@@ -727,26 +706,14 @@ final class AppViewModel: ObservableObject {
         isAuthenticating = true
 
         do {
-            switch addAccountPlatform {
-            case .codex:
-                let payload = try CodexAuthPayload(authMode: .openAIAPIKey, openAIAPIKey: apiKey).validated()
-                let identity = try resolveIdentity(
-                    from: payload,
-                    preferredDisplayName: preferredDisplayName.isEmpty ? nil : preferredDisplayName
-                )
-                try await finalizeCodexLogin(AuthLoginResult(payload: payload, identity: identity))
-            case .claude:
-                let credential = try AnthropicAPIKeyCredential(apiKey: apiKey).validated()
-                let identity = resolveAnthropicIdentity(
-                    from: credential,
-                    preferredDisplayName: preferredDisplayName.isEmpty ? nil : preferredDisplayName
-                )
-                try await finalizeClaudeLogin(
-                    identity: identity,
-                    credential: .anthropicAPIKey(credential),
-                    activateProfile: false
-                )
-            }
+            let credential = try ProviderAPIKeyCredential(apiKey: apiKey).validated()
+            let identity = resolveProviderIdentity(
+                from: credential,
+                providerRule: addAccountProviderRule,
+                providerName: addAccountProviderDisplayName.trimmingCharacters(in: .whitespacesAndNewlines),
+                preferredDisplayName: preferredDisplayName.isEmpty ? nil : preferredDisplayName
+            )
+            try await finalizeProviderLogin(identity: identity, credential: credential)
         } catch {
             addAccountError = error.localizedDescription
             addAccountStatus = L10n.tr("API Key 接入失败。")
@@ -758,9 +725,9 @@ final class AppViewModel: ObservableObject {
     }
 
     func importClaudeProfile() async {
-        guard addAccountPlatform == .claude else {
+        guard addAccountMode == .claudeProfile else {
             addAccountError = nil
-            addAccountStatus = selectedPlatformAddAccountMessage
+            addAccountStatus = selectedAddAccountMessage
             return
         }
 
@@ -799,22 +766,24 @@ final class AppViewModel: ObservableObject {
         pendingRestartPromptMessage = nil
 
         do {
-            switch account.platform {
-            case .codex:
+            switch account.providerRule {
+            case .chatgptOAuth:
                 let payload = try await latestPayloadForSwitch(for: account)
                 try authFileManager.activatePreservingFileIdentity(payload)
-            case .claude:
+            case .claudeProfile:
                 let credential = try latestCredential(for: account)
                 if let snapshotRef = credential.claudeProfileSnapshotRef {
                     try claudeProfileManager.activateProfile(snapshotRef)
                 }
+            case .openAICompatible, .claudeCompatible:
+                break
             }
             setActiveAccount(account.id)
             selectedAccountID = account.id
             database.appendLog(level: .info, message: L10n.tr("已切换到账号 %@。", account.displayName))
             try await persistDatabase()
             switchingAccountID = nil
-            if account.platform == .codex {
+            if account.providerRule == .chatgptOAuth {
                 verifyingSwitchAccountID = account.id
                 await verifySwitch(at: Date(), for: account.id)
             } else {
@@ -935,6 +904,7 @@ final class AppViewModel: ObservableObject {
         browserCallbackInput = ""
         apiKeyInput = ""
         apiKeyDisplayName = ""
+        addAccountProviderDisplayName = ""
         addAccountError = nil
         prepareAddAccountSheet()
         isAuthenticating = false
@@ -970,6 +940,20 @@ final class AppViewModel: ObservableObject {
         dismissAddAccountSheet()
     }
 
+    private func finalizeProviderLogin(
+        identity: AuthIdentity,
+        credential: ProviderAPIKeyCredential
+    ) async throws {
+        let account = upsertProviderAccount(identity: identity, makeActive: false)
+        try credentialStore.save(.providerAPIKey(credential), for: account.id)
+        setActiveAccount(account.id)
+        selectedAccountID = account.id
+        database.appendLog(level: .info, message: L10n.tr("已登录并激活账号 %@。", account.displayName))
+        try await persistDatabase()
+        pushBanner(level: .info, message: L10n.tr("已切换到账号 %@。", account.displayName))
+        dismissAddAccountSheet()
+    }
+
     private func resolveIdentity(from payload: CodexAuthPayload, preferredDisplayName: String? = nil) throws -> AuthIdentity {
         switch payload.authMode {
         case .chatgpt:
@@ -984,7 +968,7 @@ final class AppViewModel: ObservableObject {
                 email: validatedPayload.credentialSummary,
                 planType: nil
             )
-        case .claudeProfile, .anthropicAPIKey:
+        case .claudeProfile, .anthropicAPIKey, .providerAPIKey:
             throw CodexAuthPayloadError.unsupportedAuthMode
         }
     }
@@ -1021,6 +1005,31 @@ final class AppViewModel: ObservableObject {
         )
     }
 
+    private func resolveProviderIdentity(
+        from credential: ProviderAPIKeyCredential,
+        providerRule: ProviderRule,
+        providerName: String,
+        preferredDisplayName: String? = nil
+    ) -> AuthIdentity {
+        let suffix = String(credential.apiKey.suffix(6))
+        let providerTitle = providerName.isEmpty
+            ? ProviderCatalog.providerDisplayName(
+                presetID: addAccountProviderPresetID,
+                fallbackDisplayName: nil,
+                fallbackRule: providerRule
+            )
+            : providerName
+        let fallbackDisplayName = suffix.isEmpty
+            ? L10n.tr("%@ API Key", providerTitle)
+            : L10n.tr("%@ API Key • %@", providerTitle, suffix)
+        return AuthIdentity(
+            accountID: credential.accountIdentifier,
+            displayName: preferredDisplayName ?? fallbackDisplayName,
+            email: credential.credentialSummary,
+            planType: nil
+        )
+    }
+
     private func upsertAccount(identity: AuthIdentity, payload: CodexAuthPayload, makeActive: Bool) -> ManagedAccount {
         let existing = database.accounts.first(where: { $0.platform == .codex && $0.accountIdentifier == identity.accountID })
         let refreshDate = CodexDateCoding.parse(payload.lastRefresh)
@@ -1032,6 +1041,8 @@ final class AppViewModel: ObservableObject {
             displayName: existing?.displayName ?? identity.displayName,
             email: identity.email ?? existing?.email,
             authKind: payload.authMode,
+            providerRule: .chatgptOAuth,
+            defaultCLITarget: existing?.defaultCLITarget ?? .codex,
             createdAt: existing?.createdAt ?? Date(),
             lastUsedAt: existing?.lastUsedAt,
             lastQuotaSnapshotAt: existing?.lastQuotaSnapshotAt,
@@ -1073,12 +1084,48 @@ final class AppViewModel: ObservableObject {
             displayName: existing?.displayName ?? identity.displayName,
             email: identity.email ?? existing?.email,
             authKind: authKind,
+            providerRule: .claudeProfile,
+            defaultCLITarget: existing?.defaultCLITarget ?? .claude,
             createdAt: existing?.createdAt ?? Date(),
             lastUsedAt: existing?.lastUsedAt,
             lastQuotaSnapshotAt: existing?.lastQuotaSnapshotAt,
             lastRefreshAt: existing?.lastRefreshAt,
             planType: identity.planType ?? existing?.planType,
             subscriptionDetails: nil,
+            lastStatusCheckAt: existing?.lastStatusCheckAt,
+            lastStatusMessage: existing?.lastStatusMessage,
+            lastStatusLevel: existing?.lastStatusLevel,
+            isActive: makeActive
+        )
+        database.upsert(account: account)
+        return account
+    }
+
+    private func upsertProviderAccount(identity: AuthIdentity, makeActive: Bool) -> ManagedAccount {
+        let existing = database.accounts.first(where: { $0.accountIdentifier == identity.accountID })
+        let providerDisplayName = addAccountProviderDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let platform: PlatformKind = addAccountProviderRule == .claudeCompatible ? .claude : .codex
+        let account = ManagedAccount(
+            id: existing?.id ?? UUID(),
+            platform: platform,
+            accountIdentifier: identity.accountID,
+            displayName: existing?.displayName ?? identity.displayName,
+            email: identity.email ?? existing?.email,
+            authKind: .providerAPIKey,
+            providerRule: addAccountProviderRule,
+            providerPresetID: addAccountProviderPresetID,
+            providerDisplayName: providerDisplayName.isEmpty ? selectedProviderPreset?.displayName : providerDisplayName,
+            providerBaseURL: addAccountProviderBaseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            providerAPIKeyEnvName: addAccountProviderAPIKeyEnvName.trimmingCharacters(in: .whitespacesAndNewlines),
+            defaultModel: addAccountDefaultModel.trimmingCharacters(in: .whitespacesAndNewlines),
+            defaultCLITarget: existing?.defaultCLITarget ?? addAccountProviderRule.defaultTarget,
+            createdAt: existing?.createdAt ?? Date(),
+            lastUsedAt: existing?.lastUsedAt,
+            lastQuotaSnapshotAt: existing?.lastQuotaSnapshotAt,
+            lastRefreshAt: existing?.lastRefreshAt,
+            planType: existing?.planType,
+            subscriptionDetails: existing?.subscriptionDetails,
             lastStatusCheckAt: existing?.lastStatusCheckAt,
             lastStatusMessage: existing?.lastStatusMessage,
             lastStatusLevel: existing?.lastStatusLevel,
@@ -1100,15 +1147,15 @@ final class AppViewModel: ObservableObject {
         let startedAt = Date()
 
         do {
-            switch currentAccount.platform {
-            case .codex:
+            switch currentAccount.providerRule {
+            case .chatgptOAuth, .openAICompatible:
                 return try await refreshCodexAccountStatus(
                     currentAccount,
                     accountID: accountID,
                     showBanner: showBanner,
                     startedAt: startedAt
                 )
-            case .claude:
+            case .claudeProfile, .claudeCompatible:
                 return try await refreshClaudeAccountStatus(
                     currentAccount,
                     accountID: accountID,
@@ -1133,6 +1180,25 @@ final class AppViewModel: ObservableObject {
         showBanner: Bool,
         startedAt: Date
     ) async throws -> AccountStatusRefreshOutcome {
+        if currentAccount.authKind == .providerAPIKey {
+            let _ = try latestCredential(for: currentAccount).providerAPIKeyCredential
+            let statusMessage = L10n.tr("Provider API Key 本地凭据可用。")
+            let logMessage = L10n.tr("已确认 Provider 账号 %@ 的本地凭据可用。", currentAccount.displayName)
+            updateStatusMetadata(
+                for: accountID,
+                level: .info,
+                message: statusMessage,
+                checkedAt: Date(),
+                planType: currentAccount.planType
+            )
+            if showBanner {
+                banner = BannerState(level: .info, message: logMessage)
+            }
+            database.appendLog(level: .info, message: logMessage)
+            try await persistDatabase()
+            return .success
+        }
+
         let sourcePayload = try latestCodexPayloadForRefresh(for: currentAccount)
         if sourcePayload.authMode == .openAIAPIKey {
             let isActive = database.account(id: accountID)?.isActive ?? currentAccount.isActive
@@ -1256,6 +1322,33 @@ final class AppViewModel: ObservableObject {
             database.appendLog(level: .info, message: L10n.tr("已手动更新账号 %@ 的状态。", currentAccount.displayName))
             try await persistDatabase()
             return .success
+        case let .providerAPIKey(providerCredential):
+            if currentAccount.providerPresetID == "anthropic" {
+                let snapshot = try await claudeAPIClient.probeStatus(using: AnthropicAPIKeyCredential(apiKey: providerCredential.apiKey))
+                database.updateClaudeRateLimitSnapshot(snapshot, for: accountID)
+                let message = L10n.tr("Anthropic API Key 已刷新：请求剩余 %@。", claudeRequestsRemainingText(snapshot.requests.remaining))
+                updateStatusMetadata(
+                    for: accountID,
+                    level: .info,
+                    message: message,
+                    checkedAt: snapshot.capturedAt,
+                    planType: currentAccount.planType
+                )
+            } else {
+                updateStatusMetadata(
+                    for: accountID,
+                    level: .info,
+                    message: L10n.tr("Provider API Key 本地凭据可用。"),
+                    checkedAt: Date(),
+                    planType: currentAccount.planType
+                )
+            }
+            if showBanner {
+                banner = BannerState(level: .info, message: L10n.tr("已手动更新账号 %@ 的状态。", currentAccount.displayName))
+            }
+            database.appendLog(level: .info, message: L10n.tr("已手动更新账号 %@ 的状态。", currentAccount.displayName))
+            try await persistDatabase()
+            return .success
         case .claudeProfile:
             let message = L10n.tr("这是本地 Claude Profile；应用不会在线刷新 claude.ai 登录态，可直接从应用启动 Claude CLI 验证。")
             updateStatusMetadata(for: accountID, level: .info, message: message, checkedAt: Date(), planType: currentAccount.planType)
@@ -1302,21 +1395,19 @@ final class AppViewModel: ObservableObject {
 
     private func openCLIImpl(
         for account: ManagedAccount,
-        environmentProfile: CLIEnvironmentProfile,
+        target: CLIEnvironmentTarget,
         workingDirectoryURL: URL
     ) async throws {
-        switch environmentProfile.target {
+        switch target {
         case .codex:
             let context = try await resolveCodexLaunchContext(
                 for: account,
-                environmentProfile: environmentProfile,
                 workingDirectoryURL: workingDirectoryURL
             )
             try codexCLILauncher.launchCLI(context: context)
         case .claude:
             let context = try await resolveClaudeLaunchContext(
                 for: account,
-                environmentProfile: environmentProfile,
                 workingDirectoryURL: workingDirectoryURL
             )
             try claudeCLILauncher.launchCLI(context: context)
@@ -1325,14 +1416,12 @@ final class AppViewModel: ObservableObject {
 
     private func resolveCodexLaunchContext(
         for account: ManagedAccount,
-        environmentProfile: CLIEnvironmentProfile,
         workingDirectoryURL: URL
     ) async throws -> ResolvedCodexCLILaunchContext {
-        let configuration = environmentProfile.resolvedCodex
-        let shouldUseAccountCredentials = account.platform == .codex && configuration.useAccountCredentials
-
         var payload: CodexAuthPayload?
-        if shouldUseAccountCredentials {
+        var providerCredential: ProviderAPIKeyCredential?
+
+        if account.providerRule == .chatgptOAuth {
             if account.isActive,
                let currentPayload = try authFileManager.readCurrentAuth(),
                currentPayload.accountIdentifier == account.accountIdentifier
@@ -1343,7 +1432,7 @@ final class AppViewModel: ObservableObject {
                 payload = try latestCodexPayloadForRefresh(for: account)
             }
 
-            if let resolvedPayload = payload, resolvedPayload.authMode == .chatgpt, (!account.isActive || configuration.requiresConfigFile) {
+            if let resolvedPayload = payload, resolvedPayload.authMode == .chatgpt, !account.isActive {
                 do {
                     let refreshed = try await oauthClient.refreshAuth(using: resolvedPayload)
                     payload = refreshed.payload
@@ -1356,32 +1445,31 @@ final class AppViewModel: ObservableObject {
                     try? await persistDatabase()
                 }
             }
+        } else if account.authKind == .providerAPIKey {
+            providerCredential = try latestCredential(for: account).providerAPIKeyCredential
         }
 
-        return try cliEnvironmentResolver.resolveCodexContext(
+        return try await cliEnvironmentResolver.resolveCodexContext(
             for: account,
-            environmentProfile: environmentProfile,
             workingDirectoryURL: workingDirectoryURL,
             appPaths: paths,
-            authPayload: payload
+            authPayload: payload,
+            providerAPIKeyCredential: providerCredential,
+            claudeProviderCodexBridgeManager: claudeProviderCodexBridgeManager
         )
     }
 
     private func resolveClaudeLaunchContext(
         for account: ManagedAccount,
-        environmentProfile: CLIEnvironmentProfile,
         workingDirectoryURL: URL
     ) async throws -> ResolvedClaudeCLILaunchContext {
-        let configuration = environmentProfile.resolvedClaude
-        let shouldUseAccountCredentials = account.platform == .claude && configuration.usesAccountCredentials
-        let credential = shouldUseAccountCredentials ? try latestCredential(for: account) : nil
+        let credential = account.providerRule == .claudeProfile || account.providerRule == .claudeCompatible || account.authKind == .providerAPIKey
+            ? try latestCredential(for: account)
+            : nil
         let codexAuthPayload = try await latestCodexPayloadForClaudeLaunch(for: account)
 
         return try await cliEnvironmentResolver.resolveClaudeContext(
             for: account,
-            environmentProfile: environmentProfile,
-            allEnvironmentProfiles: database.cliEnvironmentProfiles,
-            preferredCodexEnvironmentID: database.preferredCodexEnvironmentID(for: account.id),
             workingDirectoryURL: workingDirectoryURL,
             appPaths: paths,
             codexAuthPayload: codexAuthPayload,
@@ -1393,7 +1481,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func latestCodexPayloadForClaudeLaunch(for account: ManagedAccount) async throws -> CodexAuthPayload? {
-        guard account.platform == .codex else {
+        guard account.providerRule == .chatgptOAuth else {
             return nil
         }
 
@@ -1560,7 +1648,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func startQuotaMonitor() {
-        let activeCodexAccountID = database.account(id: database.activeAccountID)?.platform == .codex ? database.activeAccountID : nil
+        let activeCodexAccountID = database.account(id: database.activeAccountID)?.providerRule == .chatgptOAuth ? database.activeAccountID : nil
         quotaMonitor.setActiveAccountID(activeCodexAccountID)
         quotaMonitor.start(
             onSnapshot: { [weak self] accountID, snapshot in
@@ -1584,7 +1672,7 @@ final class AppViewModel: ObservableObject {
 
     private func setActiveAccount(_ accountID: UUID?) {
         database.setActiveAccount(accountID)
-        let activeCodexAccountID = database.account(id: accountID)?.platform == .codex ? accountID : nil
+        let activeCodexAccountID = database.account(id: accountID)?.providerRule == .chatgptOAuth ? accountID : nil
         quotaMonitor.setActiveAccountID(activeCodexAccountID)
         if accountID == nil {
             lowQuotaSwitchRecommendation = nil
@@ -1633,7 +1721,7 @@ final class AppViewModel: ObservableObject {
 
     private func evaluateLowQuotaSwitchRecommendation() {
         guard let activeAccount = database.account(id: database.activeAccountID),
-              activeAccount.platform == .codex,
+              activeAccount.providerRule == .chatgptOAuth,
               let activeSnapshot = database.snapshot(for: activeAccount.id),
               activeSnapshot.primary.remainingPercent <= 10
         else {
@@ -1686,7 +1774,7 @@ final class AppViewModel: ObservableObject {
 
     private func bestLowQuotaSwitchCandidate(excluding activeAccountID: UUID) -> (account: ManagedAccount, snapshot: QuotaSnapshot)? {
         database.accounts
-            .filter { $0.platform == .codex && $0.id != activeAccountID }
+            .filter { $0.providerRule == .chatgptOAuth && $0.id != activeAccountID }
             .compactMap { account -> (ManagedAccount, QuotaSnapshot)? in
                 guard let snapshot = database.snapshot(for: account.id) else { return nil }
                 return (account, snapshot)
@@ -1713,23 +1801,41 @@ final class AppViewModel: ObservableObject {
         case .codex:
             return ""
         case .claude:
-            return L10n.tr("Claude 当前支持本地 Profile 导入、Anthropic API Key 管理和 Claude CLI 启动；不支持 claude.ai OAuth 切换。")
+            return L10n.tr("Claude 当前支持本地 Profile 导入、Claude 兼容 API Key 管理和 Claude CLI 启动；不支持 claude.ai OAuth 切换。")
         }
     }
 
-    private func addAccountMessage(for platform: PlatformKind, mode: AddAccountMode) -> String {
-        switch (platform, mode) {
-        case (.codex, .browser):
-            return L10n.tr("选择浏览器登录或 API Key 接入方式。")
-        case (.codex, .openAIAPIKey):
-            return L10n.tr("将 API Key 写入 `~/.codex/auth.json` 并缓存到本地账号库，后续可以像其它账号一样切换。")
-        case (.claude, .claudeProfile):
+    private func addAccountMessage(for mode: AddAccountMode) -> String {
+        switch mode {
+        case .chatgptBrowser:
+            return L10n.tr("通过浏览器登录 ChatGPT 账号，后续可以直接打开 Codex CLI 或 Claude Code。")
+        case .providerAPIKey:
+            return L10n.tr("新增一个 API Key Provider 账号。用户后续只需要关心打开 Codex CLI 还是 Claude Code。")
+        case .claudeProfile:
             return L10n.tr("导入当前 `~/.claude` 与 `~/.claude.json`，保存为可切换的本地 Claude Profile。")
-        case (.claude, .anthropicAPIKey):
-            return L10n.tr("保存 Anthropic API Key。切换后仅影响应用内当前账号与从应用启动的 Claude CLI。")
-        default:
-            return L10n.tr("选择浏览器登录或 API Key 接入方式。")
         }
+    }
+
+    func applyProviderPreset(_ preset: ProviderPreset?) {
+        guard let preset else { return }
+        addAccountProviderPresetID = preset.id
+        if !preset.isCustom {
+            addAccountProviderDisplayName = preset.displayName
+            addAccountProviderBaseURL = preset.baseURL
+            addAccountProviderAPIKeyEnvName = preset.apiKeyEnvName
+            addAccountDefaultModel = preset.defaultModel
+        } else {
+            if addAccountProviderDisplayName.isEmpty {
+                addAccountProviderDisplayName = ""
+            }
+            if addAccountProviderBaseURL.isEmpty {
+                addAccountProviderBaseURL = ""
+            }
+            if addAccountProviderAPIKeyEnvName.isEmpty {
+                addAccountProviderAPIKeyEnvName = addAccountProviderRule == .claudeCompatible ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"
+            }
+        }
+        addAccountStatus = selectedAddAccountMessage
     }
 
     private func syncSelectedAccount(preferredAccountID: UUID? = nil) {

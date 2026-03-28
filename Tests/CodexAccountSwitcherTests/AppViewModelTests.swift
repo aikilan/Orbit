@@ -490,21 +490,23 @@ final class AppViewModelTests: XCTestCase {
         )
 
         await harness.model.prepare()
+        harness.model.addAccountMode = .providerAPIKey
         harness.model.apiKeyInput = "sk-test-api-key"
         harness.model.apiKeyDisplayName = "API 测试账号"
 
         await harness.model.startAPIKeyLogin()
 
-        XCTAssertEqual(harness.model.activeAccount?.authMode, .apiKey)
+        XCTAssertEqual(harness.model.activeAccount?.authMode, .providerAPIKey)
+        XCTAssertEqual(harness.model.activeAccount?.providerRule, .openAICompatible)
+        XCTAssertEqual(harness.model.activeAccount?.providerPresetID, "openai")
         XCTAssertEqual(harness.model.activeAccount?.displayName, "API 测试账号")
-        XCTAssertEqual(harness.authFileManager.activatedPayloads.last?.authMode, .apiKey)
-        XCTAssertEqual(harness.authFileManager.activatedPayloads.last?.openAIAPIKey, "sk-test-api-key")
+        XCTAssertTrue(harness.authFileManager.activatedPayloads.isEmpty)
+        XCTAssertEqual(try harness.credentialStore.load(for: try XCTUnwrap(harness.model.activeAccount?.id)).providerAPIKeyCredential?.apiKey, "sk-test-api-key")
     }
 
     func testStartAPIKeyLoginKeepsExistingAccountsWhenAddingDifferentKey() async throws {
         let accountID = UUID()
         let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
-        let newPayload = try makeAPIKeyPayload("sk-test-api-key-2")
         let harness = try await makeHarness(
             accountID: accountID,
             cachedPayload: cachedPayload,
@@ -516,15 +518,17 @@ final class AppViewModelTests: XCTestCase {
         await harness.model.prepare()
         XCTAssertEqual(harness.model.accounts.count, 1)
 
+        harness.model.addAccountMode = .providerAPIKey
         harness.model.apiKeyInput = "sk-test-api-key-2"
         harness.model.apiKeyDisplayName = "第二个账号"
 
         await harness.model.startAPIKeyLogin()
 
+        let newCredential = try ProviderAPIKeyCredential(apiKey: "sk-test-api-key-2").validated()
         XCTAssertEqual(harness.model.accounts.count, 2)
         XCTAssertTrue(harness.model.accounts.contains(where: { $0.codexAccountID == cachedPayload.accountIdentifier }))
-        XCTAssertTrue(harness.model.accounts.contains(where: { $0.codexAccountID == newPayload.accountIdentifier }))
-        XCTAssertEqual(harness.model.activeAccount?.codexAccountID, newPayload.accountIdentifier)
+        XCTAssertTrue(harness.model.accounts.contains(where: { $0.accountIdentifier == newCredential.accountIdentifier }))
+        XCTAssertEqual(harness.model.activeAccount?.accountIdentifier, newCredential.accountIdentifier)
         XCTAssertEqual(harness.model.activeAccount?.displayName, "第二个账号")
     }
 
@@ -542,14 +546,16 @@ final class AppViewModelTests: XCTestCase {
         await harness.model.prepare()
         XCTAssertEqual(harness.model.accounts.count, 1)
 
+        harness.model.addAccountMode = .providerAPIKey
         harness.model.apiKeyInput = "sk-test-same-key"
         harness.model.apiKeyDisplayName = "重复登录"
 
         await harness.model.startAPIKeyLogin()
 
+        let credential = try ProviderAPIKeyCredential(apiKey: "sk-test-same-key").validated()
         XCTAssertEqual(harness.model.accounts.count, 1)
         XCTAssertEqual(harness.model.activeAccount?.id, accountID)
-        XCTAssertEqual(harness.model.activeAccount?.codexAccountID, cachedPayload.accountIdentifier)
+        XCTAssertEqual(harness.model.activeAccount?.accountIdentifier, credential.accountIdentifier)
     }
 
     func testAccountsListCombinesPlatformsAndFocusedPlatformStateFollowsSelection() async throws {
@@ -599,15 +605,15 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(harness.model.focusedPlatform, .claude)
         XCTAssertTrue(harness.model.canAddAccounts)
         XCTAssertEqual(harness.model.focusedPlatformHomeButtonTitle, L10n.tr("打开 ~/.claude"))
-        XCTAssertEqual(harness.model.addAccountPlatform, .claude)
-        XCTAssertEqual(harness.model.availableAddAccountModes, [.claudeProfile, .anthropicAPIKey])
+        XCTAssertEqual(harness.model.addAccountMode, .chatgptBrowser)
+        XCTAssertEqual(harness.model.availableAddAccountModes, AddAccountMode.allCases)
         XCTAssertEqual(
             harness.model.focusedPlatformUnsupportedMessage,
-            L10n.tr("Claude 当前支持本地 Profile 导入、Anthropic API Key 管理和 Claude CLI 启动；不支持 claude.ai OAuth 切换。")
+            L10n.tr("Claude 当前支持本地 Profile 导入、Claude 兼容 API Key 管理和 Claude CLI 启动；不支持 claude.ai OAuth 切换。")
         )
     }
 
-    func testPrepareAddAccountSheetDefaultsToActivePlatformAndFallsBackToCodex() async throws {
+    func testPrepareAddAccountSheetDefaultsToChatGPTBrowserMode() async throws {
         let accountID = UUID()
         let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
 
@@ -624,15 +630,15 @@ final class AppViewModelTests: XCTestCase {
 
         harness.model.selectedAccountID = nil
         harness.model.prepareAddAccountSheet()
-        XCTAssertEqual(harness.model.addAccountPlatform, .codex)
+        XCTAssertEqual(harness.model.addAccountMode, .chatgptBrowser)
 
         await harness.model.deleteAccount(accountID, clearCurrentAuth: false)
 
         harness.model.prepareAddAccountSheet()
-        XCTAssertEqual(harness.model.addAccountPlatform, .codex)
+        XCTAssertEqual(harness.model.addAccountMode, .chatgptBrowser)
     }
 
-    func testClaudeAPIKeyLoginDoesNotWriteCodexAuth() async throws {
+    func testProviderAPIKeyLoginDoesNotWriteCodexAuthForClaudeCompatibleAccount() async throws {
         let accountID = UUID()
         let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
         let authFileManager = RecordingAuthFileManager()
@@ -646,17 +652,22 @@ final class AppViewModelTests: XCTestCase {
         )
 
         await harness.model.prepare()
-        harness.model.addAccountPlatform = .claude
-        harness.model.addAccountMode = .anthropicAPIKey
+        harness.model.addAccountMode = .providerAPIKey
+        harness.model.addAccountProviderRule = .claudeCompatible
+        harness.model.applyProviderPreset(ProviderCatalog.preset(id: "anthropic"))
         harness.model.apiKeyInput = "sk-ant-test-claude"
         harness.model.apiKeyDisplayName = "Claude API"
+        harness.model.addAccountDefaultModel = "claude-sonnet-4.5"
 
         await harness.model.startAPIKeyLogin()
 
         XCTAssertTrue(authFileManager.activatedPayloads.isEmpty)
         XCTAssertEqual(harness.model.accounts.count, 2)
         XCTAssertEqual(harness.model.activeAccount?.platform, .claude)
-        XCTAssertEqual(harness.model.activeAccount?.authMode, .anthropicAPIKey)
+        XCTAssertEqual(harness.model.activeAccount?.authMode, .providerAPIKey)
+        XCTAssertEqual(harness.model.activeAccount?.providerRule, .claudeCompatible)
+        XCTAssertEqual(harness.model.activeAccount?.providerPresetID, "anthropic")
+        XCTAssertEqual(harness.model.activeAccount?.defaultCLITarget, .claude)
         XCTAssertEqual(harness.model.activeAccount?.displayName, "Claude API")
         XCTAssertEqual(harness.model.selectedAccount?.displayName, "Claude API")
         XCTAssertEqual(
@@ -665,133 +676,66 @@ final class AppViewModelTests: XCTestCase {
         )
     }
 
-    func testClaudeAccountOpensClaudeCLIWithoutUsingCodexLauncher() async throws {
+    func testClaudeCompatibleProviderAccountOpensCodexCLIThroughBridge() async throws {
         let accountID = UUID()
+        let providerAccountID = UUID()
         let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
-        let cliLauncher = RecordingCodexCLILauncher()
-        let claudeCLILauncher = RecordingClaudeCLILauncher()
-        let claudeAccountID = UUID()
+        let codexCLILauncher = RecordingCodexCLILauncher()
+        let bridgeManager = RecordingClaudeProviderCodexBridgeManager()
 
         let harness = try await makeHarness(
             accountID: accountID,
             cachedPayload: cachedPayload,
             authFileManager: RecordingAuthFileManager(),
             oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
-            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
             extraSeeds: [
                 AccountSeed(
-                    account: ManagedAccount(
-                        id: claudeAccountID,
+                    account: makeProviderAccount(
+                        id: providerAccountID,
                         platform: .claude,
-                        codexAccountID: "claude-api",
+                        identifier: "acct_claude_provider",
                         displayName: "Claude API",
-                        email: "sk-ant-...claude",
-                        authMode: .anthropicAPIKey,
-                        createdAt: Date(),
-                        lastUsedAt: nil,
-                        lastQuotaSnapshotAt: nil,
-                        lastRefreshAt: nil,
-                        planType: nil,
-                        lastStatusCheckAt: nil,
-                        lastStatusMessage: nil,
-                        lastStatusLevel: nil,
-                        isActive: false
+                        email: "sk-...claude",
+                        rule: .claudeCompatible,
+                        presetID: "anthropic",
+                        baseURL: "https://api.anthropic.com/v1",
+                        envName: "ANTHROPIC_API_KEY",
+                        model: "claude-sonnet-4.5"
                     ),
-                    payload: .anthropicAPIKey(try AnthropicAPIKeyCredential(apiKey: "sk-ant-test-claude").validated()),
+                    payload: try makeProviderCredential("sk-ant-test-claude"),
                     snapshot: nil
                 )
             ],
-            cliLauncher: cliLauncher,
-            claudeCLILauncher: claudeCLILauncher
-        )
-
-        await harness.model.prepare()
-        let account = try XCTUnwrap(harness.model.database.account(id: claudeAccountID))
-
-        await harness.model.openCodexCLI(for: account, workingDirectoryURL: makeWorkingDirectoryURL("claude-cli"))
-
-        XCTAssertEqual(cliLauncher.launchCallCount, 0)
-        XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
-        XCTAssertEqual(harness.model.cliWorkingDirectories(for: account.id), [makeWorkingDirectoryURL("claude-cli").path])
-        XCTAssertEqual(
-            harness.model.banner?.message,
-            L10n.tr("已为账号 %@ 打开 %@。", "Claude API", CLIEnvironmentTarget.claude.displayName)
-        )
-    }
-
-    func testOpenCLIUsesExplicitProviderClaudeEnvironmentForCodexAccount() async throws {
-        let accountID = UUID()
-        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
-        let codexCLILauncher = RecordingCodexCLILauncher()
-        let claudeCLILauncher = RecordingClaudeCLILauncher()
-        let patchedRuntimeManager = RecordingClaudePatchedRuntimeManager()
-
-        let harness = try await makeHarness(
-            accountID: accountID,
-            cachedPayload: cachedPayload,
-            authFileManager: RecordingAuthFileManager(),
-            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
-            runtimeInspector: MockRuntimeInspector(result: .verified),
             cliLauncher: codexCLILauncher,
-            claudeCLILauncher: claudeCLILauncher,
-            claudePatchedRuntimeManager: patchedRuntimeManager
+            claudeProviderCodexBridgeManager: bridgeManager
         )
 
         await harness.model.prepare()
-        let account = try XCTUnwrap(harness.model.accounts.first)
-        let environmentProfile = CLIEnvironmentProfile(
-            displayName: "Claude Proxy",
-            target: .claude,
-            claude: ClaudeCLIEnvironmentConfiguration(
-                providerSource: .explicitProvider,
-                model: "claude-sonnet-4.5",
-                providerBaseURL: "https://proxy.example/v1",
-                apiKeyEnvName: "ANTHROPIC_API_KEY",
-                apiKey: "sk-ant-custom",
-                contextLimit: 200000
-            )
-        )
-        let workingDirectoryURL = makeWorkingDirectoryURL("codex-account-claude-cli")
+        let account = try XCTUnwrap(harness.model.database.account(id: providerAccountID))
 
-        harness.model.saveCLIEnvironmentProfile(environmentProfile)
-        harness.model.setDefaultCLIEnvironmentID(environmentProfile.id, for: account.id)
+        await harness.model.openCodexCLI(for: account, workingDirectoryURL: makeWorkingDirectoryURL("claude-provider-codex"))
 
-        await harness.model.openCLI(for: account, workingDirectoryURL: workingDirectoryURL)
-
-        XCTAssertEqual(codexCLILauncher.launchCallCount, 0)
-        XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
-        XCTAssertEqual(claudeCLILauncher.lastContext?.arguments, ["--model", "claude-sonnet-4.5"])
-        XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_BASE_URL"], "https://proxy.example/v1")
-        XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_API_KEY"], "sk-ant-custom")
-        XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_CUSTOM_MODEL_OPTION"], "claude-sonnet-4.5")
-        XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
-        let record = try XCTUnwrap(harness.model.cliLaunchHistory(for: account.id).first)
-        XCTAssertEqual(record.environmentID, environmentProfile.id)
-        XCTAssertEqual(record.environmentSnapshot, environmentProfile)
-        XCTAssertEqual(harness.model.banner?.message, L10n.tr("已为账号 %@ 打开 %@。", account.displayName, CLIEnvironmentTarget.claude.displayName))
+        let bridgeSnapshot = await bridgeManager.snapshot()
+        XCTAssertEqual(bridgeSnapshot.prepareCallCount, 1)
+        XCTAssertEqual(bridgeSnapshot.lastAccountID, providerAccountID)
+        XCTAssertEqual(bridgeSnapshot.lastBaseURL, "https://api.anthropic.com/v1")
+        XCTAssertEqual(bridgeSnapshot.lastAPIKeyEnvName, "ANTHROPIC_API_KEY")
+        XCTAssertEqual(bridgeSnapshot.lastAPIKey, "sk-ant-test-claude")
+        XCTAssertEqual(bridgeSnapshot.lastModel, "claude-sonnet-4.5")
+        XCTAssertEqual(codexCLILauncher.launchCallCount, 1)
+        XCTAssertEqual(codexCLILauncher.lastContext?.environmentVariables["OPENAI_API_KEY"], "claude-provider-bridge")
+        XCTAssertTrue(codexCLILauncher.lastContext?.configFileContents?.contains("base_url = \"http://127.0.0.1:18081\"") == true)
+        XCTAssertEqual(harness.model.cliLaunchHistory(for: account.id).first?.target, .codex)
     }
 
-    func testOpenCLIAutoInheritsPreferredCodexEnvironmentForClaudeRuntime() async throws {
+    func testOpenAICompatibleProviderAccountOpensClaudeCodeThroughBridge() async throws {
         let accountID = UUID()
+        let providerAccountID = UUID()
         let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
         let claudeCLILauncher = RecordingClaudeCLILauncher()
         let patchedRuntimeManager = RecordingClaudePatchedRuntimeManager()
-        let preferredCodexEnvironment = CLIEnvironmentProfile(
-            displayName: "OpenRouter Codex",
-            target: .codex,
-            codex: CodexCLIEnvironmentConfiguration(
-                model: "openrouter/anthropic/claude-sonnet-4.5",
-                modelProvider: "openrouter",
-                useAccountCredentials: false,
-                customProvider: CodexCustomProviderConfig(
-                    identifier: "openrouter",
-                    displayName: "OpenRouter",
-                    baseURL: "https://openrouter.ai/api/v1",
-                    envKey: "OPENROUTER_API_KEY",
-                    apiKey: "sk-or-test"
-                )
-            )
-        )
+        let bridgeManager = RecordingCodexOAuthClaudeBridgeManager()
 
         let harness = try await makeHarness(
             accountID: accountID,
@@ -799,28 +743,50 @@ final class AppViewModelTests: XCTestCase {
             authFileManager: RecordingAuthFileManager(),
             oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
             runtimeInspector: MockRuntimeInspector(result: .verified),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: providerAccountID,
+                        platform: .codex,
+                        identifier: "acct_openrouter_provider",
+                        displayName: "OpenRouter",
+                        email: "sk-...router",
+                        rule: .openAICompatible,
+                        presetID: "openrouter",
+                        baseURL: "https://openrouter.ai/api/v1",
+                        envName: "OPENROUTER_API_KEY",
+                        model: "openrouter/anthropic/claude-sonnet-4.5"
+                    ),
+                    payload: try makeProviderCredential("sk-or-test"),
+                    snapshot: nil
+                )
+            ],
             claudeCLILauncher: claudeCLILauncher,
-            claudePatchedRuntimeManager: patchedRuntimeManager
+            claudePatchedRuntimeManager: patchedRuntimeManager,
+            codexOAuthClaudeBridgeManager: bridgeManager
         )
 
         await harness.model.prepare()
-        let account = try XCTUnwrap(harness.model.accounts.first)
-        harness.model.saveCLIEnvironmentProfile(preferredCodexEnvironment)
-        harness.model.setDefaultCLIEnvironmentID(preferredCodexEnvironment.id, for: account.id)
+        let account = try XCTUnwrap(harness.model.database.account(id: providerAccountID))
 
-        let claudeEnvironment = CLIEnvironmentProfile(
-            displayName: "Claude via Codex",
+        await harness.model.openCLI(
+            for: account,
             target: .claude,
-            claude: ClaudeCLIEnvironmentConfiguration(
-                providerSource: .inheritCodexEnvironment,
-                contextLimit: 250000
+            workingDirectoryURL: makeWorkingDirectoryURL("openrouter-claude")
+        )
+
+        let bridgeSnapshot = await bridgeManager.snapshot()
+        XCTAssertEqual(bridgeSnapshot.prepareCallCount, 1)
+        XCTAssertEqual(bridgeSnapshot.lastAccountID, providerAccountID)
+        XCTAssertEqual(
+            bridgeSnapshot.lastSource,
+            .provider(
+                baseURL: "https://openrouter.ai/api/v1",
+                apiKeyEnvName: "OPENROUTER_API_KEY",
+                apiKey: "sk-or-test"
             )
         )
-        harness.model.saveCLIEnvironmentProfile(claudeEnvironment)
-        harness.model.setDefaultCLIEnvironmentID(claudeEnvironment.id, for: account.id)
-
-        await harness.model.openCLI(for: account, workingDirectoryURL: makeWorkingDirectoryURL("claude-inherit-codex"))
-
+        XCTAssertEqual(bridgeSnapshot.lastModel, "openrouter/anthropic/claude-sonnet-4.5")
         XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
         XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
         XCTAssertEqual(
@@ -829,36 +795,20 @@ final class AppViewModelTests: XCTestCase {
                 source: .inheritCodexEnvironment,
                 model: "openrouter/anthropic/claude-sonnet-4.5",
                 modelProvider: "openrouter",
-                baseURL: "https://openrouter.ai/api/v1",
+                baseURL: "http://127.0.0.1:18080",
                 apiKeyEnvName: "ANTHROPIC_API_KEY"
             )
         )
-        XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_API_KEY"], "sk-or-test")
-        XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["CLAUDE_CODE_CONTEXT_LIMIT"], "250000")
-        XCTAssertEqual(harness.model.defaultCLIEnvironmentID(for: account.id), claudeEnvironment.id)
+        XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_BASE_URL"], "http://127.0.0.1:18080")
+        XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_API_KEY"], "codex-oauth-bridge")
     }
 
-    func testOpenCLIAutoInheritsPreferredCodexEnvironmentForBuiltInClaudeEnvironment() async throws {
+    func testClaudeCompatibleProviderAccountOpensClaudeCodeDirectly() async throws {
         let accountID = UUID()
+        let providerAccountID = UUID()
         let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
         let claudeCLILauncher = RecordingClaudeCLILauncher()
         let patchedRuntimeManager = RecordingClaudePatchedRuntimeManager()
-        let preferredCodexEnvironment = CLIEnvironmentProfile(
-            displayName: "OpenRouter Codex",
-            target: .codex,
-            codex: CodexCLIEnvironmentConfiguration(
-                model: "openrouter/anthropic/claude-sonnet-4.5",
-                modelProvider: "openrouter",
-                useAccountCredentials: false,
-                customProvider: CodexCustomProviderConfig(
-                    identifier: "openrouter",
-                    displayName: "OpenRouter",
-                    baseURL: "https://openrouter.ai/api/v1",
-                    envKey: "OPENROUTER_API_KEY",
-                    apiKey: "sk-or-test"
-                )
-            )
-        )
 
         let harness = try await makeHarness(
             accountID: accountID,
@@ -866,27 +816,51 @@ final class AppViewModelTests: XCTestCase {
             authFileManager: RecordingAuthFileManager(),
             oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
             runtimeInspector: MockRuntimeInspector(result: .verified),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: providerAccountID,
+                        platform: .claude,
+                        identifier: "acct_claude_direct",
+                        displayName: "Claude Direct",
+                        email: "sk-...direct",
+                        rule: .claudeCompatible,
+                        presetID: "anthropic",
+                        baseURL: "https://api.anthropic.com/v1",
+                        envName: "ANTHROPIC_API_KEY",
+                        model: "claude-sonnet-4.5"
+                    ),
+                    payload: try makeProviderCredential("sk-ant-direct"),
+                    snapshot: nil
+                )
+            ],
             claudeCLILauncher: claudeCLILauncher,
             claudePatchedRuntimeManager: patchedRuntimeManager
         )
 
         await harness.model.prepare()
-        let account = try XCTUnwrap(harness.model.accounts.first)
-        harness.model.saveCLIEnvironmentProfile(preferredCodexEnvironment)
-        harness.model.setDefaultCLIEnvironmentID(preferredCodexEnvironment.id, for: account.id)
-        harness.model.setDefaultCLIEnvironmentID(CLIEnvironmentProfile.builtInClaudeProfileID, for: account.id)
+        let account = try XCTUnwrap(harness.model.database.account(id: providerAccountID))
 
-        await harness.model.openCLI(for: account, workingDirectoryURL: makeWorkingDirectoryURL("builtin-claude-inherit-codex"))
+        await harness.model.openCLI(for: account, workingDirectoryURL: makeWorkingDirectoryURL("claude-direct"))
 
         XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
         XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
-        XCTAssertEqual(claudeCLILauncher.lastContext?.providerSnapshot?.source, .inheritCodexEnvironment)
-        XCTAssertEqual(claudeCLILauncher.lastContext?.providerSnapshot?.model, "openrouter/anthropic/claude-sonnet-4.5")
-        XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_API_KEY"], "sk-or-test")
-        XCTAssertEqual(harness.model.defaultCLIEnvironmentID(for: account.id), CLIEnvironmentProfile.builtInClaudeProfileID)
+        XCTAssertEqual(
+            claudeCLILauncher.lastContext?.providerSnapshot,
+            ResolvedClaudeProviderSnapshot(
+                source: .explicitProvider,
+                model: "claude-sonnet-4.5",
+                modelProvider: nil,
+                baseURL: "https://api.anthropic.com/v1",
+                apiKeyEnvName: "ANTHROPIC_API_KEY"
+            )
+        )
+        XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_BASE_URL"], "https://api.anthropic.com/v1")
+        XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_API_KEY"], "sk-ant-direct")
+        XCTAssertEqual(harness.model.defaultCLITarget(for: account), .claude)
     }
 
-    func testOpenCLIBuiltInClaudeEnvironmentUsesCodexOAuthBridgeFromBuiltInCodexEnvironment() async throws {
+    func testChatGPTAccountOpensClaudeCodeUsingCodexOAuthBridge() async throws {
         let accountID = UUID()
         let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
         let authFileManager = RecordingAuthFileManager()
@@ -909,101 +883,29 @@ final class AppViewModelTests: XCTestCase {
 
         await harness.model.prepare()
         let account = try XCTUnwrap(harness.model.accounts.first)
-        harness.model.setDefaultCLIEnvironmentID(CLIEnvironmentProfile.builtInClaudeProfileID, for: account.id)
 
-        await harness.model.openCLI(for: account, workingDirectoryURL: makeWorkingDirectoryURL("builtin-claude-codex-oauth"))
+        await harness.model.openCLI(
+            for: account,
+            target: .claude,
+            workingDirectoryURL: makeWorkingDirectoryURL("chatgpt-claude")
+        )
 
         let bridgeSnapshot = await bridgeManager.snapshot()
-        XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
         XCTAssertEqual(bridgeSnapshot.prepareCallCount, 1)
         XCTAssertEqual(bridgeSnapshot.lastAccountID, accountID)
-        XCTAssertEqual(bridgeSnapshot.lastPayload, cachedPayload)
+        XCTAssertEqual(bridgeSnapshot.lastSource, .codexAuthPayload(cachedPayload))
         XCTAssertEqual(bridgeSnapshot.lastModel, "gpt-5.4")
+        XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
         XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
         XCTAssertEqual(claudeCLILauncher.lastContext?.providerSnapshot?.source, .inheritCodexEnvironment)
         XCTAssertEqual(claudeCLILauncher.lastContext?.providerSnapshot?.model, "gpt-5.4")
         XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_BASE_URL"], "http://127.0.0.1:18080")
         XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_API_KEY"], "codex-oauth-bridge")
-        XCTAssertEqual(harness.model.banner?.message, L10n.tr("已为账号 %@ 打开 %@。", account.displayName, CLIEnvironmentTarget.claude.displayName))
     }
 
-    func testOpenCLIUsesExplicitLinkedCodexEnvironmentBeforePreferredCodexEnvironment() async throws {
+    func testCLILaunchHistoryStoresOnlyPathAndTarget() async throws {
         let accountID = UUID()
-        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
-        let claudeCLILauncher = RecordingClaudeCLILauncher()
-        let patchedRuntimeManager = RecordingClaudePatchedRuntimeManager()
-        let preferredCodexEnvironment = CLIEnvironmentProfile(
-            displayName: "Preferred Codex",
-            target: .codex,
-            codex: CodexCLIEnvironmentConfiguration(
-                model: "gpt-5.4",
-                modelProvider: "openai",
-                useAccountCredentials: false,
-                customProvider: CodexCustomProviderConfig(
-                    identifier: "openai",
-                    displayName: "OpenAI",
-                    baseURL: "https://api.openai.com/v1",
-                    envKey: "OPENAI_API_KEY",
-                    apiKey: "sk-openai-test"
-                )
-            )
-        )
-        let linkedCodexEnvironment = CLIEnvironmentProfile(
-            displayName: "Override Codex",
-            target: .codex,
-            codex: CodexCLIEnvironmentConfiguration(
-                model: "openrouter/anthropic/claude-sonnet-4.5",
-                modelProvider: "openrouter",
-                useAccountCredentials: false,
-                customProvider: CodexCustomProviderConfig(
-                    identifier: "openrouter",
-                    displayName: "OpenRouter",
-                    baseURL: "https://openrouter.ai/api/v1",
-                    envKey: "OPENROUTER_API_KEY",
-                    apiKey: "sk-or-test"
-                )
-            )
-        )
-
-        let harness = try await makeHarness(
-            accountID: accountID,
-            cachedPayload: cachedPayload,
-            authFileManager: RecordingAuthFileManager(),
-            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
-            runtimeInspector: MockRuntimeInspector(result: .verified),
-            claudeCLILauncher: claudeCLILauncher,
-            claudePatchedRuntimeManager: patchedRuntimeManager
-        )
-
-        await harness.model.prepare()
-        let account = try XCTUnwrap(harness.model.accounts.first)
-        harness.model.saveCLIEnvironmentProfile(preferredCodexEnvironment)
-        harness.model.setDefaultCLIEnvironmentID(preferredCodexEnvironment.id, for: account.id)
-        harness.model.saveCLIEnvironmentProfile(linkedCodexEnvironment)
-
-        let claudeEnvironment = CLIEnvironmentProfile(
-            displayName: "Claude via Override",
-            target: .claude,
-            claude: ClaudeCLIEnvironmentConfiguration(
-                providerSource: .inheritCodexEnvironment,
-                linkedCodexEnvironmentID: linkedCodexEnvironment.id
-            )
-        )
-
-        await harness.model.openCLI(
-            for: account,
-            environmentProfile: claudeEnvironment,
-            workingDirectoryURL: makeWorkingDirectoryURL("claude-inherit-linked")
-        )
-
-        XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
-        XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
-        XCTAssertEqual(claudeCLILauncher.lastContext?.providerSnapshot?.model, "openrouter/anthropic/claude-sonnet-4.5")
-        XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_API_KEY"], "sk-or-test")
-    }
-
-    func testOpenCLIFailsWhenPreferredCodexEnvironmentHasNoProviderOrAccountCredentials() async throws {
-        let accountID = UUID()
+        let providerAccountID = UUID()
         let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
         let claudeCLILauncher = RecordingClaudeCLILauncher()
 
@@ -1013,53 +915,45 @@ final class AppViewModelTests: XCTestCase {
             authFileManager: RecordingAuthFileManager(),
             oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
             runtimeInspector: MockRuntimeInspector(result: .verified),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: providerAccountID,
+                        platform: .claude,
+                        identifier: "acct_history_provider",
+                        displayName: "Claude History",
+                        email: "sk-...history",
+                        rule: .claudeCompatible,
+                        presetID: "anthropic",
+                        baseURL: "https://api.anthropic.com/v1",
+                        envName: "ANTHROPIC_API_KEY",
+                        model: "claude-sonnet-4.5"
+                    ),
+                    payload: try makeProviderCredential("sk-ant-history"),
+                    snapshot: nil
+                )
+            ],
             claudeCLILauncher: claudeCLILauncher
         )
 
         await harness.model.prepare()
-        let account = try XCTUnwrap(harness.model.accounts.first)
+        let account = try XCTUnwrap(harness.model.database.account(id: providerAccountID))
+        let workingDirectoryURL = makeWorkingDirectoryURL("cli-history")
 
-        let incompleteCodexEnvironment = CLIEnvironmentProfile(
-            displayName: "Broken Codex",
-            target: .codex,
-            codex: CodexCLIEnvironmentConfiguration(
-                model: "gpt-5.4",
-                modelProvider: "openai",
-                useAccountCredentials: false
-            )
-        )
-        harness.model.saveCLIEnvironmentProfile(incompleteCodexEnvironment)
-        harness.model.setDefaultCLIEnvironmentID(incompleteCodexEnvironment.id, for: account.id)
+        await harness.model.openCLI(for: account, workingDirectoryURL: workingDirectoryURL)
 
-        let claudeEnvironment = CLIEnvironmentProfile(
-            displayName: "Broken Claude",
-            target: .claude,
-            claude: ClaudeCLIEnvironmentConfiguration(
-                providerSource: .inheritCodexEnvironment
-            )
-        )
-        harness.model.saveCLIEnvironmentProfile(claudeEnvironment)
-        harness.model.setDefaultCLIEnvironmentID(claudeEnvironment.id, for: account.id)
-
-        await harness.model.openCLI(for: account, workingDirectoryURL: makeWorkingDirectoryURL("claude-inherit-error"))
-
-        XCTAssertEqual(claudeCLILauncher.launchCallCount, 0)
-        XCTAssertEqual(
-            harness.model.banner?.message,
-            L10n.tr(
-                "打开 %@ 失败：%@",
-                CLIEnvironmentTarget.claude.displayName,
-                CLIEnvironmentResolverError.invalidInheritedCodexProvider(incompleteCodexEnvironment.sanitizedDisplayName).localizedDescription
-            )
-        )
+        let record = try XCTUnwrap(harness.model.cliLaunchHistory(for: account.id).first)
+        XCTAssertEqual(record.path, workingDirectoryURL.path)
+        XCTAssertEqual(record.target, .claude)
     }
 
-    func testOpenCLIFailsWhenClaudeAccountUsesInheritedCodexEnvironmentWithoutOverride() async throws {
+    func testClaudeProfileAccountCannotOpenCodexCLI() async throws {
         let accountID = UUID()
-        let claudeCLILauncher = RecordingClaudeCLILauncher()
+        let claudeAccountID = UUID()
+        let codexCLILauncher = RecordingCodexCLILauncher()
 
         let harness = try await makeHarness(
-            accountID: UUID(),
+            accountID: accountID,
             cachedPayload: makePayload(accountID: "acct_cached", refreshToken: "refresh_old"),
             authFileManager: RecordingAuthFileManager(),
             oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
@@ -1067,12 +961,12 @@ final class AppViewModelTests: XCTestCase {
             extraSeeds: [
                 AccountSeed(
                     account: ManagedAccount(
-                        id: accountID,
+                        id: claudeAccountID,
                         platform: .claude,
-                        codexAccountID: "claude-api",
-                        displayName: "Claude API",
-                        email: "sk-ant-...claude",
-                        authMode: .anthropicAPIKey,
+                        codexAccountID: "claude-profile",
+                        displayName: "Claude Profile",
+                        email: nil,
+                        authMode: .claudeProfile,
                         createdAt: Date(),
                         lastUsedAt: nil,
                         lastQuotaSnapshotAt: nil,
@@ -1083,35 +977,25 @@ final class AppViewModelTests: XCTestCase {
                         lastStatusLevel: nil,
                         isActive: false
                     ),
-                    payload: .anthropicAPIKey(try AnthropicAPIKeyCredential(apiKey: "sk-ant-test-claude").validated()),
+                    payload: .claudeProfile(ClaudeProfileSnapshotRef(snapshotID: "snapshot_codex_blocked")),
                     snapshot: nil
                 )
             ],
-            claudeCLILauncher: claudeCLILauncher
+            cliLauncher: codexCLILauncher
         )
 
         await harness.model.prepare()
-        let account = try XCTUnwrap(harness.model.database.account(id: accountID))
+        let account = try XCTUnwrap(harness.model.database.account(id: claudeAccountID))
 
-        let claudeEnvironment = CLIEnvironmentProfile(
-            displayName: "Claude via Codex",
-            target: .claude,
-            claude: ClaudeCLIEnvironmentConfiguration(providerSource: .inheritCodexEnvironment)
-        )
+        await harness.model.openCodexCLI(for: account, workingDirectoryURL: makeWorkingDirectoryURL("claude-profile-codex"))
 
-        await harness.model.openCLI(
-            for: account,
-            environmentProfile: claudeEnvironment,
-            workingDirectoryURL: makeWorkingDirectoryURL("claude-account-inherit-missing")
-        )
-
-        XCTAssertEqual(claudeCLILauncher.launchCallCount, 0)
+        XCTAssertEqual(codexCLILauncher.launchCallCount, 0)
         XCTAssertEqual(
             harness.model.banner?.message,
             L10n.tr(
                 "打开 %@ 失败：%@",
-                CLIEnvironmentTarget.claude.displayName,
-                CLIEnvironmentResolverError.missingInheritedCodexEnvironment.localizedDescription
+                CLIEnvironmentTarget.codex.displayName,
+                CLIEnvironmentResolverError.codexCLINotSupported.localizedDescription
             )
         )
     }
@@ -1271,17 +1155,15 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertFalse(harness.model.isLaunchingIsolatedInstance(for: account.id))
     }
 
-    func testLaunchIsolatedCodexAllowsActiveAPIKeyAccount() async throws {
+    func testLaunchIsolatedCodexDoesNotSupportActiveProviderAccount() async throws {
         let accountID = UUID()
         let cachedPayload = try makeAPIKeyPayload("sk-test-old")
-        let authFileManager = RecordingAuthFileManager()
-        authFileManager.currentAuth = cachedPayload
         let launcher = RecordingCodexInstanceLauncher()
 
         let harness = try await makeHarness(
             accountID: accountID,
             cachedPayload: cachedPayload,
-            authFileManager: authFileManager,
+            authFileManager: RecordingAuthFileManager(),
             oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
             runtimeInspector: MockRuntimeInspector(result: .verified),
             activeAccountID: accountID,
@@ -1292,16 +1174,13 @@ final class AppViewModelTests: XCTestCase {
         let account = try XCTUnwrap(harness.model.accounts.first)
 
         XCTAssertTrue(account.isActive)
-        XCTAssertTrue(harness.model.canLaunchIsolatedCodex(for: account))
+        XCTAssertFalse(harness.model.canLaunchIsolatedCodex(for: account))
 
         await harness.model.launchIsolatedCodex(for: account)
 
-        XCTAssertEqual(launcher.launchCallCount, 1)
-        XCTAssertEqual(launcher.lastPayload, cachedPayload)
-        XCTAssertEqual(try harness.credentialStore.load(for: accountID), cachedPayload)
-        XCTAssertEqual(harness.model.banner?.message, L10n.tr("已为账号 %@ 启动独立 Codex 实例。", account.displayName))
-        XCTAssertTrue(harness.model.hasLaunchedIsolatedInstance(for: account.id))
-        XCTAssertFalse(harness.model.canLaunchIsolatedCodex(for: account))
+        XCTAssertEqual(launcher.launchCallCount, 0)
+        XCTAssertNil(launcher.lastPayload)
+        XCTAssertFalse(harness.model.hasLaunchedIsolatedInstance(for: account.id))
         XCTAssertFalse(harness.model.isLaunchingIsolatedInstance(for: account.id))
     }
 
@@ -1388,7 +1267,7 @@ final class AppViewModelTests: XCTestCase {
 
     func testLaunchIsolatedCodexBlocksRepeatedLaunchAfterSuccess() async throws {
         let accountID = UUID()
-        let cachedPayload = try makeAPIKeyPayload("sk-test-old")
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
         let launcher = RecordingCodexInstanceLauncher()
 
         let harness = try await makeHarness(
@@ -1553,7 +1432,9 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(oauthClient.refreshCallCount, 0)
         XCTAssertEqual(cliLauncher.launchCallCount, 1)
         XCTAssertEqual(cliLauncher.lastContext?.mode, .isolated)
-        XCTAssertEqual(cliLauncher.lastContext?.authPayload, cachedPayload)
+        XCTAssertNil(cliLauncher.lastContext?.authPayload)
+        XCTAssertTrue(cliLauncher.lastContext?.configFileContents?.contains("base_url = \"https://api.openai.com/v1\"") == true)
+        XCTAssertEqual(cliLauncher.lastContext?.environmentVariables["OPENAI_API_KEY"], "sk-test-old")
         XCTAssertEqual(cliLauncher.lastContext?.workingDirectoryURL, workingDirectoryURL)
         XCTAssertEqual(harness.model.cliWorkingDirectories(for: account.id), [workingDirectoryURL.path])
         XCTAssertEqual(harness.model.banner?.message, L10n.tr("已为账号 %@ 打开 Codex CLI。", account.displayName))
@@ -1630,6 +1511,7 @@ final class AppViewModelTests: XCTestCase {
         claudeCLILauncher: any ClaudeCLILaunching = RecordingClaudeCLILauncher(),
         claudePatchedRuntimeManager: any ClaudePatchedRuntimeManaging = RecordingClaudePatchedRuntimeManager(),
         codexOAuthClaudeBridgeManager: any CodexOAuthClaudeBridgeManaging = RecordingCodexOAuthClaudeBridgeManager(),
+        claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging = RecordingClaudeProviderCodexBridgeManager(),
         bannerAutoDismissDuration: Duration = .seconds(10)
     ) async throws -> AppViewModelHarness {
         let fileManager = FileManager.default
@@ -1642,49 +1524,61 @@ final class AppViewModelTests: XCTestCase {
         let paths = try AppPaths(fileManager: fileManager, codexHomeOverride: codexHome, appSupportOverride: appSupport)
         let databaseStore = AppDatabaseStore(databaseURL: paths.databaseURL)
         let credentialStore = InMemoryCredentialStore()
-        try credentialStore.save(cachedPayload, for: accountID)
 
         let isPrimaryAccountActive = activeAccountID == accountID
-        let account = ManagedAccount(
-            id: accountID,
-            platform: .codex,
-            codexAccountID: cachedPayload.accountIdentifier,
-            displayName: "Cached User",
-            email: cachedPayload.authMode == .apiKey ? cachedPayload.credentialSummary : "cached@example.com",
-            authMode: cachedPayload.authMode,
-            createdAt: Date(),
-            lastUsedAt: nil,
-            lastQuotaSnapshotAt: nil,
-            lastRefreshAt: nil,
-            planType: nil,
-            lastStatusCheckAt: nil,
-            lastStatusMessage: nil,
-            lastStatusLevel: nil,
-            isActive: isPrimaryAccountActive
-        )
-        let normalizedSeeds = extraSeeds.map { seed in
-            AccountSeed(
-                account: ManagedAccount(
-                    id: seed.account.id,
-                    platform: seed.account.platform,
-                    codexAccountID: seed.account.codexAccountID,
-                    displayName: seed.account.displayName,
-                    email: seed.account.email,
-                    authMode: seed.account.authMode,
-                    createdAt: seed.account.createdAt,
-                    lastUsedAt: seed.account.lastUsedAt,
-                    lastQuotaSnapshotAt: seed.account.lastQuotaSnapshotAt,
-                    lastRefreshAt: seed.account.lastRefreshAt,
-                    planType: seed.account.planType,
-                    subscriptionDetails: seed.account.subscriptionDetails,
-                    lastStatusCheckAt: seed.account.lastStatusCheckAt,
-                    lastStatusMessage: seed.account.lastStatusMessage,
-                    lastStatusLevel: seed.account.lastStatusLevel,
-                    isActive: activeAccountID == seed.account.id
-                ),
-                payload: seed.payload,
-                snapshot: seed.snapshot
+        let account: ManagedAccount
+        if cachedPayload.authMode == .apiKey {
+            let credential = try ProviderAPIKeyCredential(apiKey: cachedPayload.openAIAPIKey ?? "").validated()
+            try credentialStore.save(.providerAPIKey(credential), for: accountID)
+            account = ManagedAccount(
+                id: accountID,
+                platform: .codex,
+                accountIdentifier: credential.accountIdentifier,
+                displayName: "Cached User",
+                email: credential.credentialSummary,
+                authKind: .providerAPIKey,
+                providerRule: .openAICompatible,
+                providerPresetID: "openai",
+                providerDisplayName: "OpenAI",
+                providerBaseURL: "https://api.openai.com/v1",
+                providerAPIKeyEnvName: "OPENAI_API_KEY",
+                defaultModel: "gpt-5.4",
+                defaultCLITarget: .codex,
+                createdAt: Date(),
+                lastUsedAt: nil,
+                lastQuotaSnapshotAt: nil,
+                lastRefreshAt: nil,
+                planType: nil,
+                subscriptionDetails: nil,
+                lastStatusCheckAt: nil,
+                lastStatusMessage: nil,
+                lastStatusLevel: nil,
+                isActive: isPrimaryAccountActive
             )
+        } else {
+            try credentialStore.save(cachedPayload, for: accountID)
+            account = ManagedAccount(
+                id: accountID,
+                platform: .codex,
+                codexAccountID: cachedPayload.accountIdentifier,
+                displayName: "Cached User",
+                email: "cached@example.com",
+                authMode: cachedPayload.authMode,
+                createdAt: Date(),
+                lastUsedAt: nil,
+                lastQuotaSnapshotAt: nil,
+                lastRefreshAt: nil,
+                planType: nil,
+                lastStatusCheckAt: nil,
+                lastStatusMessage: nil,
+                lastStatusLevel: nil,
+                isActive: isPrimaryAccountActive
+            )
+        }
+        let normalizedSeeds = extraSeeds.map { seed in
+            var account = seed.account
+            account.isActive = activeAccountID == seed.account.id
+            return AccountSeed(account: account, payload: seed.payload, snapshot: seed.snapshot)
         }
         for seed in normalizedSeeds {
             try credentialStore.save(seed.payload, for: seed.account.id)
@@ -1715,6 +1609,7 @@ final class AppViewModelTests: XCTestCase {
             claudeCLILauncher: claudeCLILauncher,
             claudePatchedRuntimeManager: claudePatchedRuntimeManager,
             codexOAuthClaudeBridgeManager: codexOAuthClaudeBridgeManager,
+            claudeProviderCodexBridgeManager: claudeProviderCodexBridgeManager,
             bannerAutoDismissDuration: bannerAutoDismissDuration
         )
 
@@ -1741,6 +1636,51 @@ final class AppViewModelTests: XCTestCase {
 
     private func makeAPIKeyPayload(_ apiKey: String) throws -> CodexAuthPayload {
         try CodexAuthPayload(authMode: .apiKey, openAIAPIKey: apiKey).validated()
+    }
+
+    private func makeProviderCredential(_ apiKey: String) throws -> StoredCredential {
+        .providerAPIKey(try ProviderAPIKeyCredential(apiKey: apiKey).validated())
+    }
+
+    private func makeProviderAccount(
+        id: UUID,
+        platform: PlatformKind,
+        identifier: String,
+        displayName: String,
+        email: String,
+        rule: ProviderRule,
+        presetID: String,
+        baseURL: String,
+        envName: String,
+        model: String,
+        defaultTarget: CLIEnvironmentTarget? = nil,
+        isActive: Bool = false
+    ) -> ManagedAccount {
+        ManagedAccount(
+            id: id,
+            platform: platform,
+            accountIdentifier: identifier,
+            displayName: displayName,
+            email: email,
+            authKind: .providerAPIKey,
+            providerRule: rule,
+            providerPresetID: presetID,
+            providerDisplayName: nil,
+            providerBaseURL: baseURL,
+            providerAPIKeyEnvName: envName,
+            defaultModel: model,
+            defaultCLITarget: defaultTarget,
+            createdAt: Date(),
+            lastUsedAt: nil,
+            lastQuotaSnapshotAt: nil,
+            lastRefreshAt: nil,
+            planType: nil,
+            subscriptionDetails: nil,
+            lastStatusCheckAt: nil,
+            lastStatusMessage: nil,
+            lastStatusLevel: nil,
+            isActive: isActive
+        )
     }
 
     private func makeWorkingDirectoryURL(_ name: String) -> URL {
@@ -2012,23 +1952,23 @@ private actor RecordingCodexOAuthClaudeBridgeManager: CodexOAuthClaudeBridgeMana
     struct Snapshot: Equatable {
         let prepareCallCount: Int
         let lastAccountID: UUID?
-        let lastPayload: CodexAuthPayload?
+        let lastSource: OpenAICompatibleClaudeBridgeSource?
         let lastModel: String?
     }
 
     private var prepareCallCount = 0
     private var lastAccountID: UUID?
-    private var lastPayload: CodexAuthPayload?
+    private var lastSource: OpenAICompatibleClaudeBridgeSource?
     private var lastModel: String?
 
     func prepareBridge(
         accountID: UUID,
-        payload: CodexAuthPayload,
+        source: OpenAICompatibleClaudeBridgeSource,
         model: String
     ) async throws -> PreparedCodexOAuthClaudeBridge {
         prepareCallCount += 1
         lastAccountID = accountID
-        lastPayload = payload
+        lastSource = source
         lastModel = model
         return PreparedCodexOAuthClaudeBridge(
             baseURL: "http://127.0.0.1:18080",
@@ -2041,7 +1981,56 @@ private actor RecordingCodexOAuthClaudeBridgeManager: CodexOAuthClaudeBridgeMana
         Snapshot(
             prepareCallCount: prepareCallCount,
             lastAccountID: lastAccountID,
-            lastPayload: lastPayload,
+            lastSource: lastSource,
+            lastModel: lastModel
+        )
+    }
+}
+
+private actor RecordingClaudeProviderCodexBridgeManager: ClaudeProviderCodexBridgeManaging {
+    struct Snapshot: Equatable {
+        let prepareCallCount: Int
+        let lastAccountID: UUID?
+        let lastBaseURL: String?
+        let lastAPIKeyEnvName: String?
+        let lastAPIKey: String?
+        let lastModel: String?
+    }
+
+    private var prepareCallCount = 0
+    private var lastAccountID: UUID?
+    private var lastBaseURL: String?
+    private var lastAPIKeyEnvName: String?
+    private var lastAPIKey: String?
+    private var lastModel: String?
+
+    func prepareBridge(
+        accountID: UUID,
+        baseURL: String,
+        apiKeyEnvName: String,
+        apiKey: String,
+        model: String
+    ) async throws -> PreparedClaudeProviderCodexBridge {
+        prepareCallCount += 1
+        lastAccountID = accountID
+        lastBaseURL = baseURL
+        lastAPIKeyEnvName = apiKeyEnvName
+        lastAPIKey = apiKey
+        lastModel = model
+        return PreparedClaudeProviderCodexBridge(
+            baseURL: "http://127.0.0.1:18081",
+            apiKeyEnvName: "OPENAI_API_KEY",
+            apiKey: "claude-provider-bridge"
+        )
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(
+            prepareCallCount: prepareCallCount,
+            lastAccountID: lastAccountID,
+            lastBaseURL: lastBaseURL,
+            lastAPIKeyEnvName: lastAPIKeyEnvName,
+            lastAPIKey: lastAPIKey,
             lastModel: lastModel
         )
     }
