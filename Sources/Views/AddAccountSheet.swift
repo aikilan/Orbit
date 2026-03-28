@@ -9,7 +9,7 @@ struct AddAccountSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     HStack {
-                        Text(L10n.tr("新增账号"))
+                        Text(model.addAccountSheetTitle)
                             .font(.largeTitle.bold())
                         Spacer()
                         Button(L10n.tr("关闭")) {
@@ -18,22 +18,24 @@ struct AddAccountSheet: View {
                         }
                     }
 
-                    Picker(L10n.tr("接入方式"), selection: $model.addAccountMode) {
-                        ForEach(model.availableAddAccountModes) { mode in
-                            Text(mode.title).tag(mode)
+                    if model.isEditingProviderAccount {
+                        Text(L10n.tr("仅支持编辑 Provider API Key 账号；规则已锁定，API Key 留空表示继续使用当前凭据。"))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker(L10n.tr("接入方式"), selection: $model.addAccountMode) {
+                            ForEach(model.availableAddAccountModes) { mode in
+                                Text(mode.title).tag(mode)
+                            }
                         }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: model.addAccountMode) { _, mode in
-                        model.addAccountError = nil
-                        model.addAccountStatus = model.selectedAddAccountMessage
-                        if mode == .providerAPIKey {
-                            model.addAccountProviderRule = .openAICompatible
-                            model.applyProviderPreset(ProviderCatalog.preset(id: "openai"))
+                        .pickerStyle(.segmented)
+                        .onChange(of: model.addAccountMode) { _, mode in
+                            model.addAccountError = nil
+                            model.addAccountStatus = model.selectedAddAccountMessage
+                            if mode == .providerAPIKey {
+                                model.addAccountProviderRule = .openAICompatible
+                                model.applyProviderPreset(ProviderCatalog.preset(id: "openai"))
+                            }
                         }
-                    }
-                    .onAppear {
-                        model.prepareAddAccountSheet()
                     }
 
                     Text(model.addAccountStatus)
@@ -79,6 +81,7 @@ struct AddAccountSheet: View {
                                 Text(ProviderRule.claudeCompatible.displayName).tag(ProviderRule.claudeCompatible)
                             }
                             .pickerStyle(.segmented)
+                            .disabled(model.isEditingProviderAccount)
                             .onChange(of: model.addAccountProviderRule) { _, rule in
                                 let defaultPresetID = rule == .claudeCompatible ? "anthropic" : "openai"
                                 model.applyProviderPreset(ProviderCatalog.preset(id: defaultPresetID))
@@ -103,8 +106,14 @@ struct AddAccountSheet: View {
                             TextField(L10n.tr("默认模型"), text: $model.addAccountDefaultModel)
                                 .textFieldStyle(.roundedBorder)
 
-                            SecureField(L10n.tr("输入 API Key"), text: $model.apiKeyInput)
+                            SecureField(model.addAccountAPIKeyPlaceholder, text: $model.apiKeyInput)
                                 .textFieldStyle(.roundedBorder)
+
+                            if model.isEditingProviderAccount {
+                                Text(L10n.tr("留空表示继续使用当前 API Key。"))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
 
                             TextField(L10n.tr("Base URL"), text: $model.addAccountProviderBaseURL)
                                 .textFieldStyle(.roundedBorder)
@@ -177,14 +186,5 @@ struct AddAccountSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private var actionButtonTitle: String {
-        switch model.addAccountMode {
-        case .chatgptBrowser:
-            return L10n.tr("开始浏览器登录")
-        case .providerAPIKey:
-            return L10n.tr("保存并激活 Provider")
-        case .claudeProfile:
-            return L10n.tr("导入并激活 Claude Profile")
-        }
-    }
+    private var actionButtonTitle: String { model.addAccountActionButtonTitle }
 }

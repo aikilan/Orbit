@@ -131,6 +131,13 @@ struct ContentView: View {
                             Task { await model.refreshAccountStatus(account) }
                         }
                         .disabled(model.isRefreshingStatus(for: account.id) || model.isRefreshingAllStatuses || model.isSwitchInProgress)
+
+                        if model.canEditProviderAccount(account) {
+                            Button(L10n.tr("编辑 Provider")) {
+                                presentEditProviderWindow(for: account.id)
+                            }
+                            .disabled(model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
+                        }
                     }
             }
         }
@@ -160,7 +167,7 @@ struct ContentView: View {
     private var sidebarFooter: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button {
-                presentWindow(id: "add-account")
+                presentAddAccountWindow()
             } label: {
                 Label(L10n.tr("新增账号"), systemImage: "plus.circle.fill")
             }
@@ -265,6 +272,7 @@ struct ContentView: View {
                 claudeSnapshot: model.claudeRateLimitSnapshot(for: account.id),
                 authFilePath: authFilePath,
                 onRename: { model.renameAccount(account.id, to: $0) },
+                onEditProvider: { presentEditProviderWindow(for: account.id) },
                 onRefreshStatus: { Task { await model.refreshAccountStatus(account) } },
                 onSwitch: { Task { await model.switchToAccount(account) } },
                 onDelete: { model.requestDeleteAccount(account.id) }
@@ -293,6 +301,16 @@ struct ContentView: View {
             }
             return values.joined(separator: "\n")
         }
+    }
+
+    private func presentAddAccountWindow() {
+        model.prepareAddAccountSheet()
+        presentWindow(id: "add-account")
+    }
+
+    private func presentEditProviderWindow(for accountID: UUID) {
+        model.openEditProvider(for: accountID)
+        presentWindow(id: "add-account")
     }
 }
 
@@ -385,6 +403,7 @@ private struct AccountDetailView: View {
     let claudeSnapshot: ClaudeRateLimitSnapshot?
     let authFilePath: String
     let onRename: (String) -> Void
+    let onEditProvider: () -> Void
     let onRefreshStatus: () -> Void
     let onSwitch: () -> Void
     let onDelete: () -> Void
@@ -608,6 +627,14 @@ private struct AccountDetailView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(account.isActive || model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
+
+                if model.canEditProviderAccount(account) {
+                    Button(L10n.tr("编辑 Provider")) {
+                        onEditProvider()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
+                }
 
                 if account.providerRule == .chatgptOAuth {
                     Button(isolatedInstanceButtonTitle) {

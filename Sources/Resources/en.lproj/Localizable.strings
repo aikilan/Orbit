@@ -52,7 +52,10 @@
 "优先粘贴完整 URL；如果只能拿到 `code`，也可以单独粘贴。" = "Prefer pasting the full URL. If you only have the `code`, you can paste that alone.";
 "会按官方 CLI 当前写法生成 `auth.json`：仅包含 `OPENAI_API_KEY`。" = "It will generate `auth.json` in the current official CLI format: only `OPENAI_API_KEY`.";
 "保存名称" = "Save Name";
+"保存修改" = "Save Changes";
 "保存并激活 API Key" = "Save and Activate API Key";
+"保存 Provider 修改失败。" = "Failed to save Provider changes.";
+"保存 Provider 修改失败：%@" = "Failed to save Provider changes: %@";
 "先新增一个账号，或者导入当前 ~/.codex/auth.json 对应的账号。" = "Add an account first, or import the account from the current ~/.codex/auth.json.";
 "关闭" = "Close";
 "切换" = "Switch";
@@ -100,6 +103,7 @@
 "已打开目录" = "Opened Directories";
 "已回退本地缓存凭据" = "Fell back to the cached local credential";
 "已登录并激活账号 %@。" = "Signed in and activated account %@.";
+"已保存账号 %@ 的 Provider 配置。" = "Saved the Provider configuration for account %@.";
 "已确认 API Key 账号 %@ 可用，并同步当前 ~/.codex/auth.json。" = "Confirmed API Key account %@ is available and synced the current ~/.codex/auth.json.";
 "已确认 API Key 账号 %@ 的本地凭据可用。" = "Confirmed the local credential for API Key account %@ is available.";
 "已触达" = "Reached";
@@ -120,6 +124,8 @@
 "当前账号：%@" = "Current account: %@";
 "当前需要手动粘贴浏览器最终跳转的 redirect URL 或 authorization code。" = "You need to manually paste the browser's final redirect URL or authorization code.";
 "快捷操作" = "Quick Actions";
+"仅支持编辑 Provider API Key 账号；规则已锁定，API Key 留空表示继续使用当前凭据。" = "Only Provider API Key accounts can be edited here. The rule is locked, and leaving the API Key empty keeps the current credential.";
+"修改当前 Provider 配置；API Key 留空表示继续使用当前凭据。" = "Edit the current Provider configuration. Leave the API Key empty to keep the current credential.";
 "手动回调验证失败。" = "Manual callback verification failed.";
 "手动回调验证失败：%@" = "Manual callback verification failed: %@";
 "手动更新会在线刷新该账号凭据并同步在线额度；界面统一按剩余百分比展示。" = "Manual refresh will update the account credential online and sync the online quota. The UI consistently shows remaining percentages.";
@@ -208,6 +214,7 @@
 "立即重启 Codex" = "Restart Codex Now";
 "粘贴 redirect URL 或 authorization code" = "Paste redirect URL or authorization code";
 "计划类型" = "Plan Type";
+"Provider" = "Provider";
 "设备码仍在等待授权。" = "The device code is still waiting for authorization.";
 "设备码已过期。" = "The device code has expired.";
 "设备码登录失败：%@" = "Device code sign-in failed: %@";
@@ -215,6 +222,9 @@
 "说明" = "Notes";
 "请粘贴最终跳转 URL 或 authorization code。" = "Please paste the final redirect URL or authorization code.";
 "请输入 API Key。" = "Please enter an API Key.";
+"请输入默认模型。" = "Please enter a default model.";
+"这个 API Key 已属于账号 %@，请使用其他 Key。" = "This API Key already belongs to account %@. Please use a different key.";
+"只能编辑 Provider API Key 账号。" = "Only Provider API Key accounts can be edited.";
 "账号" = "Accounts";
 "账号 %@ 的独立实例已在当前会话中启动。" = "An isolated instance for account %@ has already been launched in the current session.";
 "账号 ID" = "Account ID";
@@ -222,6 +232,9 @@
 "账号状态" = "Account Status";
 "账号状态更新失败：%@" = "Failed to update account status: %@";
 "账号详情" = "Account Details";
+"编辑 Provider" = "Edit Provider";
+"输入 API Key" = "Enter API Key";
+"输入新的 API Key（留空则不变）" = "Enter a new API Key (leave empty to keep the current one)";
 "输入 OPENAI_API_KEY" = "Enter OPENAI_API_KEY";
 "运行态信号" = "Runtime Signal";
 "还没有打开过目录。先选择一个目录打开 CLI，后续就能从这里快速启动。" = "No directories have been opened yet. Choose a directory to open CLI first, then you can relaunch quickly from here.";
@@ -237,7 +250,9 @@
 "重启 Codex" = "Restart Codex";
 "重启 Codex 失败：%@" = "Failed to restart Codex: %@";
 "重新打开授权页面" = "Reopen Authorization Page";
+"正在保存 Provider 修改。" = "Saving Provider changes.";
 "额度受限" = "Quota Limited";
+"留空表示继续使用当前 API Key。" = "Leave this empty to keep the current API Key.";
 "额度快照" = "Quota Snapshot";
 "额度接口返回的数据结构无效。" = "The quota API returned an invalid data structure.";
 "额度未同步" = "Quota Not Synced";
@@ -245,6 +260,7 @@
 "验证中" = "Verifying";
 "语言" = "Language";
 "跟随系统" = "Follow System";
+"自定义" = "Custom";
 "英文" = "English";
 "简体中文" = "Simplified Chinese";
 "CLI 启动" = "CLI Launch";

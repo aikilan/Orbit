@@ -77,6 +77,11 @@ enum AddAccountMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum AddAccountSheetMode: Equatable {
+    case create
+    case editProvider(accountID: UUID)
+}
+
 private enum AccountStatusRefreshOutcome {
     case success
     case partial
@@ -88,6 +93,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var database: AppDatabase = .empty
     @Published var selectedAccountID: UUID?
     @Published private(set) var languagePreference = L10n.currentLanguagePreference
+    @Published private(set) var addAccountSheetMode: AddAccountSheetMode = .create
     @Published var addAccountMode: AddAccountMode = .chatgptBrowser
     @Published var addAccountStatus = L10n.tr("选择账号接入方式。")
     @Published var addAccountError: String?
@@ -292,7 +298,41 @@ final class AppViewModel: ObservableObject {
         return unsupportedMessage(for: focusedPlatform)
     }
 
+    var isEditingProviderAccount: Bool {
+        if case .editProvider = addAccountSheetMode {
+            return true
+        }
+        return false
+    }
+
+    var addAccountSheetTitle: String {
+        isEditingProviderAccount ? L10n.tr("编辑 Provider") : L10n.tr("新增账号")
+    }
+
+    var addAccountActionButtonTitle: String {
+        if isEditingProviderAccount {
+            return L10n.tr("保存修改")
+        }
+        switch addAccountMode {
+        case .chatgptBrowser:
+            return L10n.tr("开始浏览器登录")
+        case .providerAPIKey:
+            return L10n.tr("保存并激活 Provider")
+        case .claudeProfile:
+            return L10n.tr("导入并激活 Claude Profile")
+        }
+    }
+
+    var addAccountAPIKeyPlaceholder: String {
+        isEditingProviderAccount
+            ? L10n.tr("输入新的 API Key（留空则不变）")
+            : L10n.tr("输入 API Key")
+    }
+
     var selectedAddAccountMessage: String {
+        if isEditingProviderAccount {
+            return L10n.tr("修改当前 Provider 配置；API Key 留空表示继续使用当前凭据。")
+        }
         if addAccountMode == .providerAPIKey,
            addAccountProviderRule == .openAICompatible,
            !ProviderCatalog.supportsResponsesAPI(
@@ -323,6 +363,10 @@ final class AppViewModel: ObservableObject {
 
     var selectedProviderPreset: ProviderPreset? {
         ProviderCatalog.preset(id: addAccountProviderPresetID)
+    }
+
+    func canEditProviderAccount(_ account: ManagedAccount) -> Bool {
+        account.authKind == .providerAPIKey
     }
 
     func defaultCLITarget(for account: ManagedAccount) -> CLIEnvironmentTarget {
@@ -406,9 +450,29 @@ final class AppViewModel: ObservableObject {
     }
 
     func prepareAddAccountSheet() {
+        resetAddAccountTransientState()
+        addAccountSheetMode = .create
         addAccountMode = .chatgptBrowser
         addAccountProviderRule = .openAICompatible
         applyProviderPreset(ProviderCatalog.preset(id: "openai"))
+        addAccountStatus = selectedAddAccountMessage
+    }
+
+    func openEditProvider(for accountID: UUID) {
+        guard let account = database.account(id: accountID), canEditProviderAccount(account) else {
+            return
+        }
+
+        resetAddAccountTransientState()
+        addAccountSheetMode = .editProvider(accountID: accountID)
+        addAccountMode = .providerAPIKey
+        apiKeyDisplayName = account.displayName
+        addAccountProviderRule = account.providerRule
+        addAccountProviderPresetID = account.providerPresetID ?? ProviderCatalog.customPresetID
+        addAccountProviderDisplayName = account.providerDisplayName ?? ""
+        addAccountProviderBaseURL = account.resolvedProviderBaseURL
+        addAccountProviderAPIKeyEnvName = account.resolvedProviderAPIKeyEnvName
+        addAccountDefaultModel = account.resolvedDefaultModel
         addAccountStatus = selectedAddAccountMessage
     }
 
@@ -707,6 +771,11 @@ final class AppViewModel: ObservableObject {
     }
 
     func startAPIKeyLogin() async {
+        if case let .editProvider(accountID) = addAccountSheetMode {
+            await saveEditedProvider(accountID: accountID)
+            return
+        }
+
         addAccountError = nil
         let apiKey = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let preferredDisplayName = apiKeyDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -916,18 +985,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func dismissAddAccountSheet() {
-        browserWaitTask?.cancel()
-        browserWaitTask = nil
-        browserSession?.stop()
-        browserSession = nil
-        browserAuthorizeURL = nil
-        browserCallbackInput = ""
-        apiKeyInput = ""
-        apiKeyDisplayName = ""
-        addAccountProviderDisplayName = ""
-        addAccountError = nil
         prepareAddAccountSheet()
-        isAuthenticating = false
     }
 
     private func finalizeCodexLogin(_ result: AuthLoginResult) async throws {
@@ -972,6 +1030,90 @@ final class AppViewModel: ObservableObject {
         try await persistDatabase()
         pushBanner(level: .info, message: L10n.tr("已切换到账号 %@。", account.displayName))
         dismissAddAccountSheet()
+    }
+
+    private func saveEditedProvider(accountID: UUID) async {
+        guard let existingAccount = database.account(id: accountID), canEditProviderAccount(existingAccount) else {
+            addAccountError = L10n.tr("只能编辑 Provider API Key 账号。")
+            return
+        }
+
+        addAccountError = nil
+        let trimmedDisplayName = apiKeyDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedProviderName = addAccountProviderDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedBaseURL = addAccountProviderBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedEnvName = addAccountProviderAPIKeyEnvName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedModel = addAccountDefaultModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAPIKey = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedModel.isEmpty else {
+            addAccountError = L10n.tr("请输入默认模型。")
+            return
+        }
+
+        addAccountStatus = L10n.tr("正在保存 Provider 修改。")
+        isAuthenticating = true
+        defer { isAuthenticating = false }
+
+        do {
+            guard let currentCredential = try latestCredential(for: existingAccount).providerAPIKeyCredential else {
+                throw CredentialStoreError.unexpectedData
+            }
+
+            var resolvedCredential = currentCredential
+            var resolvedAccountIdentifier = existingAccount.accountIdentifier
+
+            if !trimmedAPIKey.isEmpty {
+                let newCredential = try ProviderAPIKeyCredential(apiKey: trimmedAPIKey).validated()
+                let newAccountIdentifier = newCredential.accountIdentifier
+
+                if let conflictingAccount = database.accounts.first(where: {
+                    $0.id != existingAccount.id && $0.accountIdentifier == newAccountIdentifier
+                }) {
+                    addAccountError = L10n.tr("这个 API Key 已属于账号 %@，请使用其他 Key。", conflictingAccount.displayName)
+                    addAccountStatus = L10n.tr("保存 Provider 修改失败。")
+                    return
+                }
+
+                resolvedCredential = newCredential
+                resolvedAccountIdentifier = newAccountIdentifier
+            }
+
+            let identity = resolveProviderIdentity(
+                from: resolvedCredential,
+                providerRule: addAccountProviderRule,
+                providerName: trimmedProviderName,
+                preferredDisplayName: trimmedDisplayName.isEmpty ? nil : trimmedDisplayName
+            )
+
+            var updatedAccount = existingAccount
+            updatedAccount.accountIdentifier = resolvedAccountIdentifier
+            updatedAccount.displayName = identity.displayName
+            updatedAccount.email = resolvedCredential.credentialSummary
+            updatedAccount.providerRule = addAccountProviderRule
+            updatedAccount.providerPresetID = addAccountProviderPresetID
+            updatedAccount.providerDisplayName = trimmedProviderName.isEmpty ? selectedProviderPreset?.displayName : trimmedProviderName
+            updatedAccount.providerBaseURL = trimmedBaseURL
+            updatedAccount.providerAPIKeyEnvName = trimmedEnvName
+            updatedAccount.defaultModel = trimmedModel
+
+            database.upsert(account: updatedAccount)
+
+            if !trimmedAPIKey.isEmpty {
+                try credentialStore.save(.providerAPIKey(resolvedCredential), for: updatedAccount.id)
+            }
+
+            let message = L10n.tr("已保存账号 %@ 的 Provider 配置。", updatedAccount.displayName)
+            database.appendLog(level: .info, message: message)
+            try await persistDatabase()
+            pushBanner(level: .info, message: message)
+            dismissAddAccountSheet()
+        } catch {
+            addAccountError = error.localizedDescription
+            addAccountStatus = L10n.tr("保存 Provider 修改失败。")
+            database.appendLog(level: .error, message: L10n.tr("保存 Provider 修改失败：%@", error.localizedDescription))
+            try? await persistDatabase()
+        }
     }
 
     private func resolveIdentity(from payload: CodexAuthPayload, preferredDisplayName: String? = nil) throws -> AuthIdentity {
@@ -1835,6 +1977,20 @@ final class AppViewModel: ObservableObject {
         case .claudeProfile:
             return L10n.tr("导入当前 `~/.claude` 与 `~/.claude.json`，保存为可切换的本地 Claude Profile。")
         }
+    }
+
+    private func resetAddAccountTransientState() {
+        browserWaitTask?.cancel()
+        browserWaitTask = nil
+        browserSession?.stop()
+        browserSession = nil
+        browserAuthorizeURL = nil
+        browserCallbackInput = ""
+        apiKeyInput = ""
+        apiKeyDisplayName = ""
+        addAccountProviderDisplayName = ""
+        addAccountError = nil
+        isAuthenticating = false
     }
 
     func applyProviderPreset(_ preset: ProviderPreset?) {

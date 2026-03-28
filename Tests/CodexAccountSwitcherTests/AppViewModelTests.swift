@@ -705,6 +705,279 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(harness.model.activeAccount?.providerBaseURL, "https://api.deepseek.com/v1")
     }
 
+    func testCanEditProviderAccountOnlyForProviderAPIKeyAccounts() async throws {
+        let accountID = UUID()
+        let cachedPayload = try makeAPIKeyPayload("sk-test-old")
+        let customCredential = try ProviderAPIKeyCredential(apiKey: "sk-custom-editable").validated()
+        let customAccountID = UUID()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: customAccountID,
+                        platform: .codex,
+                        identifier: customCredential.accountIdentifier,
+                        displayName: "Custom Provider",
+                        email: customCredential.credentialSummary,
+                        rule: .openAICompatible,
+                        presetID: ProviderCatalog.customPresetID,
+                        providerDisplayName: "DeepSeek",
+                        baseURL: "https://api.deepseek.com/v1",
+                        envName: "DEEPSEEK_API_KEY",
+                        model: "deepseek-chat"
+                    ),
+                    payload: .providerAPIKey(customCredential),
+                    snapshot: nil
+                )
+            ]
+        )
+
+        await harness.model.prepare()
+
+        let builtInAccount = try XCTUnwrap(harness.model.accounts.first(where: { $0.id == accountID }))
+        let customAccount = try XCTUnwrap(harness.model.accounts.first(where: { $0.id == customAccountID }))
+
+        XCTAssertTrue(harness.model.canEditProviderAccount(builtInAccount))
+        XCTAssertTrue(harness.model.canEditProviderAccount(customAccount))
+    }
+
+    func testOpenEditProviderPrefillsExistingValues() async throws {
+        let accountID = UUID()
+        let customAccountID = UUID()
+        let customCredential = try ProviderAPIKeyCredential(apiKey: "sk-custom-prefill").validated()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: makePayload(accountID: "acct_cached", refreshToken: "refresh_old"),
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: customAccountID,
+                        platform: .codex,
+                        identifier: customCredential.accountIdentifier,
+                        displayName: "DeepSeek 生产",
+                        email: customCredential.credentialSummary,
+                        rule: .openAICompatible,
+                        presetID: ProviderCatalog.customPresetID,
+                        providerDisplayName: "DeepSeek",
+                        baseURL: "https://api.deepseek.com/v1",
+                        envName: "DEEPSEEK_API_KEY",
+                        model: "deepseek-chat"
+                    ),
+                    payload: .providerAPIKey(customCredential),
+                    snapshot: nil
+                )
+            ]
+        )
+
+        await harness.model.prepare()
+
+        harness.model.openEditProvider(for: customAccountID)
+
+        XCTAssertTrue(harness.model.isEditingProviderAccount)
+        XCTAssertEqual(harness.model.addAccountSheetTitle, L10n.tr("编辑 Provider"))
+        XCTAssertEqual(harness.model.addAccountActionButtonTitle, L10n.tr("保存修改"))
+        XCTAssertEqual(harness.model.addAccountMode, .providerAPIKey)
+        XCTAssertEqual(harness.model.addAccountProviderRule, .openAICompatible)
+        XCTAssertEqual(harness.model.addAccountProviderPresetID, ProviderCatalog.customPresetID)
+        XCTAssertEqual(harness.model.apiKeyDisplayName, "DeepSeek 生产")
+        XCTAssertEqual(harness.model.addAccountProviderDisplayName, "DeepSeek")
+        XCTAssertEqual(harness.model.addAccountProviderBaseURL, "https://api.deepseek.com/v1")
+        XCTAssertEqual(harness.model.addAccountProviderAPIKeyEnvName, "DEEPSEEK_API_KEY")
+        XCTAssertEqual(harness.model.addAccountDefaultModel, "deepseek-chat")
+        XCTAssertEqual(
+            harness.model.addAccountStatus,
+            L10n.tr("修改当前 Provider 配置；API Key 留空表示继续使用当前凭据。")
+        )
+    }
+
+    func testEditProviderKeepsExistingAPIKeyWhenFieldIsEmpty() async throws {
+        let accountID = UUID()
+        let customAccountID = UUID()
+        let customCredential = try ProviderAPIKeyCredential(apiKey: "sk-custom-keep-old").validated()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: makePayload(accountID: "acct_cached", refreshToken: "refresh_old"),
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: customAccountID,
+                        platform: .codex,
+                        identifier: customCredential.accountIdentifier,
+                        displayName: "Custom Old",
+                        email: customCredential.credentialSummary,
+                        rule: .openAICompatible,
+                        presetID: ProviderCatalog.customPresetID,
+                        providerDisplayName: "Old Provider",
+                        baseURL: "https://old.example.com/v1",
+                        envName: "OLD_API_KEY",
+                        model: "old-model"
+                    ),
+                    payload: .providerAPIKey(customCredential),
+                    snapshot: nil
+                )
+            ]
+        )
+
+        await harness.model.prepare()
+
+        harness.model.openEditProvider(for: customAccountID)
+        harness.model.apiKeyDisplayName = "Custom Updated"
+        harness.model.addAccountProviderDisplayName = "Updated Provider"
+        harness.model.addAccountProviderBaseURL = "https://new.example.com/v1"
+        harness.model.addAccountProviderAPIKeyEnvName = "UPDATED_API_KEY"
+        harness.model.addAccountDefaultModel = "new-model"
+        harness.model.apiKeyInput = ""
+
+        await harness.model.startAPIKeyLogin()
+
+        let updatedAccount = try XCTUnwrap(harness.model.database.account(id: customAccountID))
+        XCTAssertEqual(updatedAccount.id, customAccountID)
+        XCTAssertEqual(updatedAccount.accountIdentifier, customCredential.accountIdentifier)
+        XCTAssertEqual(updatedAccount.displayName, "Custom Updated")
+        XCTAssertEqual(updatedAccount.providerDisplayName, "Updated Provider")
+        XCTAssertEqual(updatedAccount.providerBaseURL, "https://new.example.com/v1")
+        XCTAssertEqual(updatedAccount.providerAPIKeyEnvName, "UPDATED_API_KEY")
+        XCTAssertEqual(updatedAccount.defaultModel, "new-model")
+        XCTAssertEqual(try harness.credentialStore.load(for: customAccountID).providerAPIKeyCredential?.apiKey, "sk-custom-keep-old")
+        XCTAssertFalse(harness.model.isEditingProviderAccount)
+    }
+
+    func testEditProviderUpdatesCredentialAndIdentifierWhenAPIKeyChanges() async throws {
+        let accountID = UUID()
+        let customAccountID = UUID()
+        let oldCredential = try ProviderAPIKeyCredential(apiKey: "sk-custom-old-key").validated()
+        let newCredential = try ProviderAPIKeyCredential(apiKey: "sk-custom-new-key").validated()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: makePayload(accountID: "acct_cached", refreshToken: "refresh_old"),
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: customAccountID,
+                        platform: .codex,
+                        identifier: oldCredential.accountIdentifier,
+                        displayName: "Custom Old",
+                        email: oldCredential.credentialSummary,
+                        rule: .openAICompatible,
+                        presetID: ProviderCatalog.customPresetID,
+                        providerDisplayName: "Old Provider",
+                        baseURL: "https://old.example.com/v1",
+                        envName: "OLD_API_KEY",
+                        model: "old-model"
+                    ),
+                    payload: .providerAPIKey(oldCredential),
+                    snapshot: nil
+                )
+            ]
+        )
+
+        await harness.model.prepare()
+
+        harness.model.openEditProvider(for: customAccountID)
+        harness.model.apiKeyDisplayName = "Custom New"
+        harness.model.addAccountProviderDisplayName = "New Provider"
+        harness.model.addAccountProviderBaseURL = "https://new.example.com/v1"
+        harness.model.addAccountProviderAPIKeyEnvName = "NEW_API_KEY"
+        harness.model.addAccountDefaultModel = "new-model"
+        harness.model.apiKeyInput = "sk-custom-new-key"
+
+        await harness.model.startAPIKeyLogin()
+
+        let updatedAccount = try XCTUnwrap(harness.model.database.account(id: customAccountID))
+        XCTAssertEqual(updatedAccount.id, customAccountID)
+        XCTAssertEqual(updatedAccount.accountIdentifier, newCredential.accountIdentifier)
+        XCTAssertEqual(updatedAccount.displayName, "Custom New")
+        XCTAssertEqual(updatedAccount.email, newCredential.credentialSummary)
+        XCTAssertEqual(try harness.credentialStore.load(for: customAccountID).providerAPIKeyCredential?.apiKey, "sk-custom-new-key")
+    }
+
+    func testEditProviderRejectsConflictingAPIKey() async throws {
+        let accountID = UUID()
+        let firstCustomAccountID = UUID()
+        let secondCustomAccountID = UUID()
+        let firstCredential = try ProviderAPIKeyCredential(apiKey: "sk-custom-first").validated()
+        let secondCredential = try ProviderAPIKeyCredential(apiKey: "sk-custom-second").validated()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: makePayload(accountID: "acct_cached", refreshToken: "refresh_old"),
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: firstCustomAccountID,
+                        platform: .codex,
+                        identifier: firstCredential.accountIdentifier,
+                        displayName: "First Custom",
+                        email: firstCredential.credentialSummary,
+                        rule: .openAICompatible,
+                        presetID: ProviderCatalog.customPresetID,
+                        providerDisplayName: "First Provider",
+                        baseURL: "https://first.example.com/v1",
+                        envName: "FIRST_API_KEY",
+                        model: "first-model"
+                    ),
+                    payload: .providerAPIKey(firstCredential),
+                    snapshot: nil
+                ),
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: secondCustomAccountID,
+                        platform: .codex,
+                        identifier: secondCredential.accountIdentifier,
+                        displayName: "Second Custom",
+                        email: secondCredential.credentialSummary,
+                        rule: .openAICompatible,
+                        presetID: ProviderCatalog.customPresetID,
+                        providerDisplayName: "Second Provider",
+                        baseURL: "https://second.example.com/v1",
+                        envName: "SECOND_API_KEY",
+                        model: "second-model"
+                    ),
+                    payload: .providerAPIKey(secondCredential),
+                    snapshot: nil
+                )
+            ]
+        )
+
+        await harness.model.prepare()
+
+        harness.model.openEditProvider(for: firstCustomAccountID)
+        harness.model.apiKeyInput = "sk-custom-second"
+        harness.model.addAccountDefaultModel = "updated-model"
+
+        await harness.model.startAPIKeyLogin()
+
+        let unchangedAccount = try XCTUnwrap(harness.model.database.account(id: firstCustomAccountID))
+        XCTAssertEqual(unchangedAccount.accountIdentifier, firstCredential.accountIdentifier)
+        XCTAssertEqual(try harness.credentialStore.load(for: firstCustomAccountID).providerAPIKeyCredential?.apiKey, "sk-custom-first")
+        XCTAssertEqual(
+            harness.model.addAccountError,
+            L10n.tr("这个 API Key 已属于账号 %@，请使用其他 Key。", "Second Custom")
+        )
+        XCTAssertTrue(harness.model.isEditingProviderAccount)
+    }
+
     func testClaudeCompatibleProviderAccountOpensCodexCLIThroughBridge() async throws {
         let accountID = UUID()
         let providerAccountID = UUID()
@@ -1828,6 +2101,7 @@ final class AppViewModelTests: XCTestCase {
         email: String,
         rule: ProviderRule,
         presetID: String,
+        providerDisplayName: String? = nil,
         baseURL: String,
         envName: String,
         model: String,
@@ -1843,7 +2117,7 @@ final class AppViewModelTests: XCTestCase {
             authKind: .providerAPIKey,
             providerRule: rule,
             providerPresetID: presetID,
-            providerDisplayName: nil,
+            providerDisplayName: providerDisplayName,
             providerBaseURL: baseURL,
             providerAPIKeyEnvName: envName,
             defaultModel: model,

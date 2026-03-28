@@ -161,6 +161,7 @@ final class StatusBarController: NSObject {
 
     private func openAddAccountFromPopover() {
         popover.performClose(nil)
+        model.prepareAddAccountSheet()
         openWindow("add-account")
     }
 
