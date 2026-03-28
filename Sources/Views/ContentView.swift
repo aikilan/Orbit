@@ -239,7 +239,11 @@ struct ContentView: View {
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.async {
             openWindow(id: id)
+            (NSApp.delegate as? AppDelegate)?.refreshLocalization()
             NSApp.activate(ignoringOtherApps: true)
+            DispatchQueue.main.async {
+                (NSApp.delegate as? AppDelegate)?.refreshLocalization()
+            }
         }
     }
 

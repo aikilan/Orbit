@@ -12,9 +12,13 @@
 "API Key 接入失败：%@" = "API Key setup failed: %@";
 "API Key 模式不支持在线额度同步，已同步当前 ~/.codex/auth.json。" = "API Key mode does not support online quota sync. The current ~/.codex/auth.json has been synced.";
 "API Key 模式不支持在线额度同步，本地凭据可用。" = "API Key mode does not support online quota sync, but the local credential is available.";
+"API Key 环境变量" = "API Key Environment Variable";
+"API Key Provider" = "API Key Provider";
 "Account %@" = "Account %@";
 "Auth 模式" = "Auth Mode";
+"Base URL" = "Base URL";
 "ChatGPT 认证模式下不应包含 API Key。" = "API Key should not be present in ChatGPT auth mode.";
+"ChatGPT 浏览器登录" = "ChatGPT Browser Sign-in";
 "Codex Account Switcher" = "Codex Account Switcher";
 "Claude 即将支持" = "Claude Coming Soon";
 "Claude 入口已预留，但本轮不接入真实账号登录。" = "The Claude entry is reserved, but real account sign-in is not part of this release.";
@@ -62,6 +66,7 @@
 "切换中" = "Switching";
 "切换到 %@" = "Switch to %@";
 "切换到此账号" = "Switch to This Account";
+"规则" = "Rule";
 "切换前在线刷新账号 %@ 失败，已回退本地缓存凭据：%@" = "Failed to refresh account %@ online before switching. Fell back to the cached local credential: %@";
 "切换前已在线刷新账号 %@ 的凭据。" = "Refreshed the credential for account %@ online before switching.";
 "切换完成后，是否现在重启 Codex？" = "Restart Codex now after switching?";
@@ -79,6 +84,7 @@
 "口径" = "Definition";
 "可用" = "Available";
 "可用性" = "Availability";
+"接入方式" = "Setup Method";
 "启动独立 Codex 实例失败：%@" = "Failed to launch an isolated Codex instance: %@";
 "启动独立实例" = "Launch Isolated Instance";
 "在线刷新" = "Online Refresh";
@@ -148,6 +154,7 @@
 "无法编码 PNG: %@" = "Failed to encode PNG: %@";
 "显示名" = "Display Name";
 "显示名称（可选）" = "Display Name (Optional)";
+"默认模型" = "Default Model";
 "暂无账号" = "No Accounts";
 "最后使用" = "Last Used";
 "最后刷新" = "Last Refreshed";
@@ -243,13 +250,16 @@
 "退出应用" = "Quit App";
 "选择一个目录作为 Codex CLI 的启动目录。" = "Choose a directory to use as the startup directory for Codex CLI.";
 "选择浏览器登录或 API Key 接入方式。" = "Choose browser sign-in or API Key setup.";
+"选择账号接入方式。" = "Choose how to add the account.";
 "选择目录并打开 CLI" = "Choose Directory and Open CLI";
 "通过 Terminal 打开 Codex CLI 失败：%@" = "Failed to open Codex CLI via Terminal: %@";
+"通过浏览器登录 ChatGPT 账号，后续可以直接打开 Codex CLI 或 Claude Code。" = "Sign in with a ChatGPT account in the browser. You can then open Codex CLI or Claude Code directly.";
 "邮箱" = "Email";
 "采集时间" = "Captured At";
 "重启 Codex" = "Restart Codex";
 "重启 Codex 失败：%@" = "Failed to restart Codex: %@";
 "重新打开授权页面" = "Reopen Authorization Page";
+"新增一个 API Key Provider 账号。用户后续只需要关心打开 Codex CLI 还是 Claude Code。" = "Add an API Key Provider account. After that, users only need to choose whether to open Codex CLI or Claude Code.";
 "正在保存供应商修改。" = "Saving Provider changes.";
 "供应商名称" = "Provider Name";
 "保存并激活供应商" = "Save and Activate Provider";
@@ -259,6 +269,7 @@
 "当前供应商会通过本地桥接把 OpenAI Responses API 转成 chat/completions 后再启动。" = "The current Provider will use a local bridge to convert the OpenAI Responses API to chat/completions before launch.";
 "当前账号的供应商配置不完整。" = "The current account's Provider configuration is incomplete.";
 "自定义供应商" = "Custom Provider";
+"保存后账号本身就是唯一权限来源。打开 CLI 时，应用会按账号配置自动决定 provider、模型和桥接方式。" = "Once saved, the account itself becomes the only credential source. When opening the CLI, the app automatically chooses the provider, model, and bridge mode from the account configuration.";
 "额度受限" = "Quota Limited";
 "留空表示继续使用当前 API Key。" = "Leave this empty to keep the current API Key.";
 "额度快照" = "Quota Snapshot";

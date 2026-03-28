@@ -30,6 +30,25 @@ final class L10nTests: XCTestCase {
         XCTAssertEqual(L10n.tr("Provider API Key"), "Provider API Key")
     }
 
+    func testAddAccountSheetStringsAreLocalizedInEnglish() {
+        let originalPreference = L10n.currentLanguagePreference
+        defer {
+            L10n.setLanguagePreference(originalPreference)
+        }
+
+        L10n.setLanguagePreference(.english)
+        XCTAssertEqual(L10n.tr("接入方式"), "Setup Method")
+        XCTAssertEqual(L10n.tr("ChatGPT 浏览器登录"), "ChatGPT Browser Sign-in")
+        XCTAssertEqual(L10n.tr("规则"), "Rule")
+        XCTAssertEqual(L10n.tr("默认模型"), "Default Model")
+        XCTAssertEqual(L10n.tr("API Key 环境变量"), "API Key Environment Variable")
+        XCTAssertEqual(L10n.tr("选择账号接入方式。"), "Choose how to add the account.")
+        XCTAssertEqual(
+            L10n.tr("通过浏览器登录 ChatGPT 账号，后续可以直接打开 Codex CLI 或 Claude Code。"),
+            "Sign in with a ChatGPT account in the browser. You can then open Codex CLI or Claude Code directly."
+        )
+    }
+
     func testResourceBundleResolvesFromPackagedAppResourcesDirectory() throws {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
