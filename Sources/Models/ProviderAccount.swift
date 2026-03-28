@@ -201,7 +201,7 @@ enum ProviderCatalog {
         case .claudeProfile:
             return L10n.tr("Claude Profile")
         case .none:
-            return L10n.tr("自定义 Provider")
+            return L10n.tr("自定义供应商")
         }
     }
 }

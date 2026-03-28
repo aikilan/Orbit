@@ -54,8 +54,8 @@
 "保存名称" = "Save Name";
 "保存修改" = "Save Changes";
 "保存并激活 API Key" = "Save and Activate API Key";
-"保存 Provider 修改失败。" = "Failed to save Provider changes.";
-"保存 Provider 修改失败：%@" = "Failed to save Provider changes: %@";
+"保存供应商修改失败。" = "Failed to save Provider changes.";
+"保存供应商修改失败：%@" = "Failed to save Provider changes: %@";
 "先新增一个账号，或者导入当前 ~/.codex/auth.json 对应的账号。" = "Add an account first, or import the account from the current ~/.codex/auth.json.";
 "关闭" = "Close";
 "切换" = "Switch";
@@ -103,7 +103,7 @@
 "已打开目录" = "Opened Directories";
 "已回退本地缓存凭据" = "Fell back to the cached local credential";
 "已登录并激活账号 %@。" = "Signed in and activated account %@.";
-"已保存账号 %@ 的 Provider 配置。" = "Saved the Provider configuration for account %@.";
+"已保存账号 %@ 的供应商配置。" = "Saved the Provider configuration for account %@.";
 "已确认 API Key 账号 %@ 可用，并同步当前 ~/.codex/auth.json。" = "Confirmed API Key account %@ is available and synced the current ~/.codex/auth.json.";
 "已确认 API Key 账号 %@ 的本地凭据可用。" = "Confirmed the local credential for API Key account %@ is available.";
 "已触达" = "Reached";
@@ -125,7 +125,7 @@
 "当前需要手动粘贴浏览器最终跳转的 redirect URL 或 authorization code。" = "You need to manually paste the browser's final redirect URL or authorization code.";
 "快捷操作" = "Quick Actions";
 "仅支持编辑 Provider API Key 账号；规则已锁定，API Key 留空表示继续使用当前凭据。" = "Only Provider API Key accounts can be edited here. The rule is locked, and leaving the API Key empty keeps the current credential.";
-"修改当前 Provider 配置；API Key 留空表示继续使用当前凭据。" = "Edit the current Provider configuration. Leave the API Key empty to keep the current credential.";
+"修改当前供应商配置；API Key 留空表示继续使用当前凭据。" = "Edit the current Provider configuration. Leave the API Key empty to keep the current credential.";
 "手动回调验证失败。" = "Manual callback verification failed.";
 "手动回调验证失败：%@" = "Manual callback verification failed: %@";
 "手动更新会在线刷新该账号凭据并同步在线额度；界面统一按剩余百分比展示。" = "Manual refresh will update the account credential online and sync the online quota. The UI consistently shows remaining percentages.";
@@ -214,7 +214,7 @@
 "立即重启 Codex" = "Restart Codex Now";
 "粘贴 redirect URL 或 authorization code" = "Paste redirect URL or authorization code";
 "计划类型" = "Plan Type";
-"Provider" = "Provider";
+"供应商" = "Provider";
 "设备码仍在等待授权。" = "The device code is still waiting for authorization.";
 "设备码已过期。" = "The device code has expired.";
 "设备码登录失败：%@" = "Device code sign-in failed: %@";
@@ -232,7 +232,7 @@
 "账号状态" = "Account Status";
 "账号状态更新失败：%@" = "Failed to update account status: %@";
 "账号详情" = "Account Details";
-"编辑 Provider" = "Edit Provider";
+"编辑供应商" = "Edit Provider";
 "输入 API Key" = "Enter API Key";
 "输入新的 API Key（留空则不变）" = "Enter a new API Key (leave empty to keep the current one)";
 "输入 OPENAI_API_KEY" = "Enter OPENAI_API_KEY";
@@ -250,7 +250,15 @@
 "重启 Codex" = "Restart Codex";
 "重启 Codex 失败：%@" = "Failed to restart Codex: %@";
 "重新打开授权页面" = "Reopen Authorization Page";
-"正在保存 Provider 修改。" = "Saving Provider changes.";
+"正在保存供应商修改。" = "Saving Provider changes.";
+"供应商名称" = "Provider Name";
+"保存并激活供应商" = "Save and Activate Provider";
+"显式供应商" = "Explicit Provider";
+"已确认供应商账号 %@ 的本地凭据可用。" = "Confirmed the local credential for Provider account %@ is available.";
+"当前供应商不支持 OpenAI Responses API，无法用于启动 Codex CLI 或 Claude Code。" = "The current Provider does not support the OpenAI Responses API, so it cannot launch Codex CLI or Claude Code.";
+"当前供应商会通过本地桥接把 OpenAI Responses API 转成 chat/completions 后再启动。" = "The current Provider will use a local bridge to convert the OpenAI Responses API to chat/completions before launch.";
+"当前账号的供应商配置不完整。" = "The current account's Provider configuration is incomplete.";
+"自定义供应商" = "Custom Provider";
 "额度受限" = "Quota Limited";
 "留空表示继续使用当前 API Key。" = "Leave this empty to keep the current API Key.";
 "额度快照" = "Quota Snapshot";

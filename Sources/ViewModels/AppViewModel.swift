@@ -306,7 +306,7 @@ final class AppViewModel: ObservableObject {
     }
 
     var addAccountSheetTitle: String {
-        isEditingProviderAccount ? L10n.tr("编辑 Provider") : L10n.tr("新增账号")
+        isEditingProviderAccount ? L10n.tr("编辑供应商") : L10n.tr("新增账号")
     }
 
     var addAccountActionButtonTitle: String {
@@ -317,7 +317,7 @@ final class AppViewModel: ObservableObject {
         case .chatgptBrowser:
             return L10n.tr("开始浏览器登录")
         case .providerAPIKey:
-            return L10n.tr("保存并激活 Provider")
+            return L10n.tr("保存并激活供应商")
         case .claudeProfile:
             return L10n.tr("导入并激活 Claude Profile")
         }
@@ -331,7 +331,7 @@ final class AppViewModel: ObservableObject {
 
     var selectedAddAccountMessage: String {
         if isEditingProviderAccount {
-            return L10n.tr("修改当前 Provider 配置；API Key 留空表示继续使用当前凭据。")
+            return L10n.tr("修改当前供应商配置；API Key 留空表示继续使用当前凭据。")
         }
         if addAccountMode == .providerAPIKey,
            addAccountProviderRule == .openAICompatible,
@@ -340,7 +340,7 @@ final class AppViewModel: ObservableObject {
                baseURL: addAccountProviderBaseURL
            )
         {
-            return L10n.tr("当前 Provider 会通过本地桥接把 OpenAI Responses API 转成 chat/completions 后再启动。")
+            return L10n.tr("当前供应商会通过本地桥接把 OpenAI Responses API 转成 chat/completions 后再启动。")
         }
         return addAccountMessage(for: addAccountMode)
     }
@@ -1051,7 +1051,7 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        addAccountStatus = L10n.tr("正在保存 Provider 修改。")
+        addAccountStatus = L10n.tr("正在保存供应商修改。")
         isAuthenticating = true
         defer { isAuthenticating = false }
 
@@ -1071,7 +1071,7 @@ final class AppViewModel: ObservableObject {
                     $0.id != existingAccount.id && $0.accountIdentifier == newAccountIdentifier
                 }) {
                     addAccountError = L10n.tr("这个 API Key 已属于账号 %@，请使用其他 Key。", conflictingAccount.displayName)
-                    addAccountStatus = L10n.tr("保存 Provider 修改失败。")
+                    addAccountStatus = L10n.tr("保存供应商修改失败。")
                     return
                 }
 
@@ -1103,15 +1103,15 @@ final class AppViewModel: ObservableObject {
                 try credentialStore.save(.providerAPIKey(resolvedCredential), for: updatedAccount.id)
             }
 
-            let message = L10n.tr("已保存账号 %@ 的 Provider 配置。", updatedAccount.displayName)
+            let message = L10n.tr("已保存账号 %@ 的供应商配置。", updatedAccount.displayName)
             database.appendLog(level: .info, message: message)
             try await persistDatabase()
             pushBanner(level: .info, message: message)
             dismissAddAccountSheet()
         } catch {
             addAccountError = error.localizedDescription
-            addAccountStatus = L10n.tr("保存 Provider 修改失败。")
-            database.appendLog(level: .error, message: L10n.tr("保存 Provider 修改失败：%@", error.localizedDescription))
+            addAccountStatus = L10n.tr("保存供应商修改失败。")
+            database.appendLog(level: .error, message: L10n.tr("保存供应商修改失败：%@", error.localizedDescription))
             try? await persistDatabase()
         }
     }
@@ -1345,7 +1345,7 @@ final class AppViewModel: ObservableObject {
         if currentAccount.authKind == .providerAPIKey {
             let _ = try latestCredential(for: currentAccount).providerAPIKeyCredential
             let statusMessage = L10n.tr("Provider API Key 本地凭据可用。")
-            let logMessage = L10n.tr("已确认 Provider 账号 %@ 的本地凭据可用。", currentAccount.displayName)
+            let logMessage = L10n.tr("已确认供应商账号 %@ 的本地凭据可用。", currentAccount.displayName)
             updateStatusMetadata(
                 for: accountID,
                 level: .info,

@@ -87,7 +87,7 @@ struct AddAccountSheet: View {
                                 model.applyProviderPreset(ProviderCatalog.preset(id: defaultPresetID))
                             }
 
-                            Picker(L10n.tr("Provider"), selection: $model.addAccountProviderPresetID) {
+                            Picker(L10n.tr("供应商"), selection: $model.addAccountProviderPresetID) {
                                 ForEach(model.availableProviderPresets) { preset in
                                     Text(preset.displayName).tag(preset.id)
                                 }
@@ -100,7 +100,7 @@ struct AddAccountSheet: View {
                             TextField(L10n.tr("显示名称（可选）"), text: $model.apiKeyDisplayName)
                                 .textFieldStyle(.roundedBorder)
 
-                            TextField(L10n.tr("Provider 名称"), text: $model.addAccountProviderDisplayName)
+                            TextField(L10n.tr("供应商名称"), text: $model.addAccountProviderDisplayName)
                                 .textFieldStyle(.roundedBorder)
 
                             TextField(L10n.tr("默认模型"), text: $model.addAccountDefaultModel)

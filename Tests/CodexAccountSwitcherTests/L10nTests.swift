@@ -15,6 +15,21 @@ final class L10nTests: XCTestCase {
         XCTAssertEqual(L10n.tr("新增账号"), "新增账号")
     }
 
+    func testStandaloneProviderIsLocalizedButMixedTermsStayUnchanged() {
+        let originalPreference = L10n.currentLanguagePreference
+        defer {
+            L10n.setLanguagePreference(originalPreference)
+        }
+
+        L10n.setLanguagePreference(.english)
+        XCTAssertEqual(L10n.tr("供应商"), "Provider")
+        XCTAssertEqual(L10n.tr("编辑供应商"), "Edit Provider")
+
+        L10n.setLanguagePreference(.simplifiedChinese)
+        XCTAssertEqual(L10n.tr("供应商"), "供应商")
+        XCTAssertEqual(L10n.tr("Provider API Key"), "Provider API Key")
+    }
+
     func testResourceBundleResolvesFromPackagedAppResourcesDirectory() throws {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

@@ -784,7 +784,7 @@ final class AppViewModelTests: XCTestCase {
         harness.model.openEditProvider(for: customAccountID)
 
         XCTAssertTrue(harness.model.isEditingProviderAccount)
-        XCTAssertEqual(harness.model.addAccountSheetTitle, L10n.tr("编辑 Provider"))
+        XCTAssertEqual(harness.model.addAccountSheetTitle, L10n.tr("编辑供应商"))
         XCTAssertEqual(harness.model.addAccountActionButtonTitle, L10n.tr("保存修改"))
         XCTAssertEqual(harness.model.addAccountMode, .providerAPIKey)
         XCTAssertEqual(harness.model.addAccountProviderRule, .openAICompatible)
@@ -796,7 +796,7 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(harness.model.addAccountDefaultModel, "deepseek-chat")
         XCTAssertEqual(
             harness.model.addAccountStatus,
-            L10n.tr("修改当前 Provider 配置；API Key 留空表示继续使用当前凭据。")
+            L10n.tr("修改当前供应商配置；API Key 留空表示继续使用当前凭据。")
         )
     }
 

@@ -133,7 +133,7 @@ struct ContentView: View {
                         .disabled(model.isRefreshingStatus(for: account.id) || model.isRefreshingAllStatuses || model.isSwitchInProgress)
 
                         if model.canEditProviderAccount(account) {
-                            Button(L10n.tr("编辑 Provider")) {
+                            Button(L10n.tr("编辑供应商")) {
                                 presentEditProviderWindow(for: account.id)
                             }
                             .disabled(model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
@@ -629,7 +629,7 @@ private struct AccountDetailView: View {
                 .disabled(account.isActive || model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
 
                 if model.canEditProviderAccount(account) {
-                    Button(L10n.tr("编辑 Provider")) {
+                    Button(L10n.tr("编辑供应商")) {
                         onEditProvider()
                     }
                     .buttonStyle(.bordered)

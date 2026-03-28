@@ -163,7 +163,7 @@ enum ClaudeProviderSource: String, Codable, CaseIterable, Identifiable, Sendable
         case .accountCredentials:
             return L10n.tr("Claude 凭据")
         case .explicitProvider:
-            return L10n.tr("显式 Provider")
+            return L10n.tr("显式供应商")
         case .inheritCodexEnvironment:
             return L10n.tr("继承 Codex 环境")
         }

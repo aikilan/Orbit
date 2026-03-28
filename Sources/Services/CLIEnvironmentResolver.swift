@@ -17,11 +17,11 @@ enum CLIEnvironmentResolverError: LocalizedError, Equatable {
         case .missingClaudeCredential:
             return L10n.tr("当前账号缺少可用的 Claude 凭据。")
         case .invalidProviderConfiguration:
-            return L10n.tr("当前账号的 Provider 配置不完整。")
+            return L10n.tr("当前账号的供应商配置不完整。")
         case .codexCLINotSupported:
             return L10n.tr("当前账号不支持打开 Codex CLI。")
         case .providerResponsesAPINotSupported:
-            return L10n.tr("当前 Provider 不支持 OpenAI Responses API，无法用于启动 Codex CLI 或 Claude Code。")
+            return L10n.tr("当前供应商不支持 OpenAI Responses API，无法用于启动 Codex CLI 或 Claude Code。")
         }
     }
 }
