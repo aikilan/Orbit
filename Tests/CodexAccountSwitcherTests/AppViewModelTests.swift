@@ -1496,6 +1496,37 @@ final class AppViewModelTests: XCTestCase {
         )
     }
 
+    func testDeleteCLILaunchRecordRemovesSelectedDirectory() async throws {
+        let accountID = UUID()
+        let cachedPayload = try makeAPIKeyPayload("sk-test-old")
+        let cliLauncher = RecordingCodexCLILauncher()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            cliLauncher: cliLauncher
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.accounts.first)
+        let firstDirectoryURL = makeWorkingDirectoryURL("first-cli")
+        let secondDirectoryURL = makeWorkingDirectoryURL("second-cli")
+
+        await harness.model.openCodexCLI(for: account, workingDirectoryURL: firstDirectoryURL)
+        await harness.model.openCodexCLI(for: account, workingDirectoryURL: secondDirectoryURL)
+
+        let record = try XCTUnwrap(
+            harness.model.cliLaunchHistory(for: account.id).first(where: { $0.path == secondDirectoryURL.path })
+        )
+
+        harness.model.deleteCLILaunchRecord(record.id, for: account.id)
+
+        XCTAssertEqual(harness.model.cliWorkingDirectories(for: account.id), [firstDirectoryURL.path])
+    }
+
     private func makeHarness(
         accountID: UUID,
         cachedPayload: CodexAuthPayload,

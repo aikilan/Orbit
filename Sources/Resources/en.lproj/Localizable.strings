@@ -109,6 +109,7 @@
 "当前" = "Current";
 "当前 auth.json 无法导入：%@" = "The current auth.json could not be imported: %@";
 "当前不可点击" = "Not clickable right now";
+"删除此目录" = "Remove This Directory";
 "当前写入路径" = "Current Write Path";
 "当前正在使用" = "Currently Active";
 "当前没有待完成的浏览器登录会话。" = "There is no pending browser sign-in session.";

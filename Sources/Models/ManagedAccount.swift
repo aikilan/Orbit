@@ -441,6 +441,19 @@ struct AppDatabase: Codable, Sendable {
         cliLaunchHistoryByAccountID[key] = history
     }
 
+    mutating func removeCLILaunchRecord(id: UUID, for accountID: UUID) {
+        let key = accountID.uuidString
+        guard var history = cliLaunchHistoryByAccountID[key] else {
+            return
+        }
+        history.removeAll(where: { $0.id == id })
+        if history.isEmpty {
+            cliLaunchHistoryByAccountID.removeValue(forKey: key)
+        } else {
+            cliLaunchHistoryByAccountID[key] = history
+        }
+    }
+
     mutating func normalizeCLIEnvironmentState() {
         for account in accounts {
             guard let index = accounts.firstIndex(where: { $0.id == account.id }) else {

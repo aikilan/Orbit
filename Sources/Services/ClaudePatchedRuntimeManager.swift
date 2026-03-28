@@ -170,18 +170,40 @@ struct ClaudePatchedRuntimeManager: @unchecked Sendable {
     }
 
     private func patchCustomModelValidation(in contents: String) throws -> String {
-        let marker = "function P66(q){"
-        guard let range = contents.range(of: marker) else {
-            throw ClaudePatchedRuntimeManagerError.patchFailed(L10n.tr("没有找到自定义模型校验入口。"))
+        let injectedValidation = """
+        if($2&&process.env.ANTHROPIC_CUSTOM_MODEL_OPTION&&String($2).trim().toLowerCase()===process.env.ANTHROPIC_CUSTOM_MODEL_OPTION.trim().toLowerCase())return!0;
+        """
+        if contents.contains("process.env.ANTHROPIC_CUSTOM_MODEL_OPTION&&String(") {
+            return contents
         }
 
-        let injected = """
-        function P66(q){if(q&&process.env.ANTHROPIC_CUSTOM_MODEL_OPTION&&mj8(q).trim().toLowerCase()===process.env.ANTHROPIC_CUSTOM_MODEL_OPTION.trim().toLowerCase())return!0;
-        """
+        let patterns = [
+            (
+                try NSRegularExpression(
+                    pattern: #"function\s+([$\w]+)\(([$\w]+)\)\{let\s+([$\w]+)=J7\(\)\|\|\{\},\{availableModels:([$\w]+)\}=\3;if\(!\4\)return!0;"#
+                ),
+                "function $1($2){\(injectedValidation)let $3=J7()||{},{availableModels:$4}=$3;if(!$4)return!0;"
+            ),
+            (
+                try NSRegularExpression(
+                    pattern: #"function\s+([$\w]+)\(([$\w]+)\)\{let\s+([$\w]+)=([$\w]+)\(\)\|\|\{availableModels:\[\]\};"#
+                ),
+                "function $1($2){\(injectedValidation)let $3=$4()||{availableModels:[]};"
+            ),
+        ]
 
-        var updated = contents
-        updated.replaceSubrange(range, with: injected)
-        return updated
+        let range = NSRange(contents.startIndex..., in: contents)
+        for (pattern, template) in patterns {
+            if pattern.firstMatch(in: contents, range: range) != nil {
+                return pattern.stringByReplacingMatches(
+                    in: contents,
+                    range: range,
+                    withTemplate: template
+                )
+            }
+        }
+
+        throw ClaudePatchedRuntimeManagerError.patchFailed(L10n.tr("没有找到自定义模型校验入口。"))
     }
 
     private func patchCustomAgentModels(in contents: String) throws -> String {
@@ -254,9 +276,22 @@ struct ClaudePatchedRuntimeManager: @unchecked Sendable {
     }
 
     private func patchContextLimit(in contents: String) -> String {
-        contents.replacingOccurrences(
-            of: "var af1=200000,",
-            with: "var af1=(+process.env.CLAUDE_CODE_CONTEXT_LIMIT||200000),"
+        if contents.contains("CLAUDE_CODE_CONTEXT_LIMIT") {
+            return contents
+        }
+
+        guard let pattern = try? NSRegularExpression(pattern: #"var\s+([$\w]+)=200000,([$\w]+)=20000"#) else {
+            return contents
+        }
+        let range = NSRange(contents.startIndex..., in: contents)
+        guard pattern.firstMatch(in: contents, range: range) != nil else {
+            return contents
+        }
+
+        return pattern.stringByReplacingMatches(
+            in: contents,
+            range: range,
+            withTemplate: "var $1=(+process.env.CLAUDE_CODE_CONTEXT_LIMIT||200000),$2=20000"
         )
     }
 

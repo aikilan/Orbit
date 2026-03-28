@@ -372,6 +372,13 @@ final class AppViewModel: ObservableObject {
         database.cliLaunchHistory(for: accountID)
     }
 
+    func deleteCLILaunchRecord(_ recordID: UUID, for accountID: UUID) {
+        database.removeCLILaunchRecord(id: recordID, for: accountID)
+        Task {
+            try? await persistDatabase()
+        }
+    }
+
     func shouldOfferRestartCodex(for account: ManagedAccount) -> Bool {
         restartRecommendedAccountID == account.id && runtimeInspector.isCodexDesktopRunning()
     }

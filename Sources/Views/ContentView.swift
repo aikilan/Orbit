@@ -690,6 +690,9 @@ private struct AccountDetailView: View {
                                 || model.isSwitchInProgress,
                             onOpen: {
                                 launchCLI(record: record)
+                            },
+                            onDelete: {
+                                model.deleteCLILaunchRecord(record.id, for: account.id)
                             }
                         )
                     }
@@ -857,52 +860,65 @@ private struct CLIDirectoryHistoryCard: View {
     let record: CLILaunchRecord
     let isDisabled: Bool
     let onOpen: () -> Void
+    let onDelete: () -> Void
 
     @State private var isHovering = false
 
     var body: some View {
-        Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .center, spacing: 8) {
-                    Text(URL(fileURLWithPath: record.path).lastPathComponent)
-                        .font(.headline)
-                        .lineLimit(1)
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: onOpen) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .center, spacing: 8) {
+                        Text(URL(fileURLWithPath: record.path).lastPathComponent)
+                            .font(.headline)
+                            .lineLimit(1)
 
-                    Spacer(minLength: 8)
+                        Spacer(minLength: 8)
 
-                    Text(L10n.tr("点击启动 CLI"))
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(isDisabled ? .tertiary : .secondary)
+                        Text(L10n.tr("点击启动 CLI"))
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(isDisabled ? .tertiary : .secondary)
+                    }
+
+                    HStack(spacing: 8) {
+                        Text(record.target.displayName)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.accentColor.opacity(0.12), in: Capsule())
+                    }
+
+                    Text(record.path)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
-
-                HStack(spacing: 8) {
-                    Text(record.target.displayName)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.accentColor.opacity(0.12), in: Capsule())
-                }
-
-                Text(record.path)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(backgroundColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(overlayColor, lineWidth: isHovering && !isDisabled ? 1 : 0)
-            )
-            .scaleEffect(isHovering && !isDisabled ? 1.01 : 1)
-            .animation(.easeOut(duration: 0.12), value: isHovering)
+            .buttonStyle(.plain)
+            .disabled(isDisabled)
+            .help(isDisabled ? L10n.tr("当前不可点击") : L10n.tr("点击快速启动 CLI"))
+
+            Button(role: .destructive, action: onDelete) {
+                Image(systemName: "trash")
+                    .font(.callout.weight(.semibold))
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.borderless)
+            .disabled(isDisabled)
+            .help(isDisabled ? L10n.tr("当前不可点击") : L10n.tr("删除此目录"))
+            .accessibilityLabel(L10n.tr("删除此目录"))
         }
-        .buttonStyle(.plain)
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .disabled(isDisabled)
-        .help(isDisabled ? L10n.tr("当前不可点击") : L10n.tr("点击快速启动 CLI"))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(backgroundColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(overlayColor, lineWidth: isHovering && !isDisabled ? 1 : 0)
+        )
+        .scaleEffect(isHovering && !isDisabled ? 1.01 : 1)
+        .animation(.easeOut(duration: 0.12), value: isHovering)
         .onHover { hovering in
             isHovering = hovering
         }
