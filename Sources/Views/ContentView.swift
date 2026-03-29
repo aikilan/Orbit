@@ -2,12 +2,12 @@ import AppKit
 import SwiftUI
 
 private enum SidebarLayoutMetrics {
-    static let minWidth: CGFloat = 260
-    static let idealWidth: CGFloat = 300
-    static let maxWidth: CGFloat = 360
-    static let horizontalPadding: CGFloat = 16
-    static let sectionVerticalPadding: CGFloat = 16
-    static let footerPadding: CGFloat = 16
+    static let minWidth: CGFloat = 272
+    static let idealWidth: CGFloat = 286
+    static let maxWidth: CGFloat = 332
+    static let horizontalPadding: CGFloat = 18
+    static let sectionVerticalPadding: CGFloat = 18
+    static let footerPadding: CGFloat = 18
 }
 
 @MainActor
@@ -30,6 +30,8 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(OrbitPalette.background)
+        .tint(OrbitPalette.accent)
         .task {
             WindowRouter.shared.register { id in
                 openWindow(id: id)
@@ -86,13 +88,26 @@ struct ContentView: View {
             sidebarFooter
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(OrbitPalette.sidebar)
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(OrbitPalette.divider)
+                .frame(width: 1)
+        }
     }
 
     private var sidebarHeader: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.tr("Orbit"))
+                .font(.system(size: 32, weight: .bold, design: .rounded))
+
+            Text(L10n.tr("本地 LLM 账号工作台"))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
             Text(L10n.tr("账号"))
-                .font(.title2.bold())
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, SidebarLayoutMetrics.horizontalPadding)
         .padding(.vertical, SidebarLayoutMetrics.sectionVerticalPadding)
@@ -112,15 +127,22 @@ struct ContentView: View {
     }
 
     private var sidebarAccountList: some View {
-        List(selection: $model.selectedAccountID) {
-            ForEach(model.accounts) { account in
-                AccountListRow(
-                    account: account,
-                    snapshot: model.snapshot(for: account.id),
-                    claudeSnapshot: model.claudeRateLimitSnapshot(for: account.id)
-                )
-                    .tag(account.id)
-                    .contentShape(Rectangle())
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(model.accounts) { account in
+                    Button {
+                        model.selectedAccountID = account.id
+                    } label: {
+                        AccountListRow(
+                            account: account,
+                            snapshot: model.snapshot(for: account.id),
+                            claudeSnapshot: model.claudeRateLimitSnapshot(for: account.id),
+                            isSelected: resolvedSelectedAccountID == account.id
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                     .contextMenu {
                         Button(account.isActive ? L10n.tr("当前正在使用") : L10n.tr("切换到此账号")) {
                             Task { await model.switchToAccount(account) }
@@ -139,9 +161,13 @@ struct ContentView: View {
                             .disabled(model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
                         }
                     }
+                }
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .listStyle(.sidebar)
+        .background(OrbitPalette.sidebar)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
@@ -150,28 +176,30 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(L10n.tr("还没有账号"))
                     .font(.headline)
-                    .foregroundStyle(.secondary)
 
                 Text(L10n.tr("先新增一个账号，支持 Codex 浏览器登录 / API Key，以及 Claude Profile / Anthropic API Key。"))
-                    .font(.caption)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, SidebarLayoutMetrics.horizontalPadding)
-            .padding(.vertical, 20)
+            .padding(OrbitSpacing.section)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var sidebarFooter: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.tr("快捷操作"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
             Button {
                 presentAddAccountWindow()
             } label: {
                 Label(L10n.tr("新增账号"), systemImage: "plus.circle.fill")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
             .disabled(!model.canAddAccounts)
 
             if let homeButtonTitle = model.focusedPlatformHomeButtonTitle {
@@ -214,6 +242,7 @@ struct ContentView: View {
                 .pickerStyle(.menu)
                 .labelsHidden()
             }
+            .padding(.top, 4)
 
             if !model.focusedPlatformUnsupportedMessage.isEmpty {
                 Text(model.focusedPlatformUnsupportedMessage)
@@ -232,6 +261,10 @@ struct ContentView: View {
         .padding(SidebarLayoutMetrics.footerPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var resolvedSelectedAccountID: UUID? {
+        model.selectedAccountID ?? model.activeAccount?.id
     }
 
     private func presentWindow(id: String) {
@@ -325,9 +358,9 @@ private struct AccountPlatformBadge: View {
         Text(platform.displayName)
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.secondary.opacity(0.12), in: Capsule())
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.primary.opacity(0.05), in: Capsule())
     }
 }
 
@@ -335,39 +368,60 @@ private struct AccountListRow: View {
     let account: ManagedAccount
     let snapshot: QuotaSnapshot?
     let claudeSnapshot: ClaudeRateLimitSnapshot?
+    let isSelected: Bool
+
+    @State private var isHovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
                 Text(account.displayName)
-                    .font(.headline)
+                    .font(.headline.weight(isSelected ? .semibold : .medium))
+                    .lineLimit(1)
+
+                Spacer(minLength: 6)
+
                 if account.isActive {
                     Text(L10n.tr("当前"))
                         .font(.caption.bold())
                         .foregroundStyle(.green)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.green.opacity(0.12), in: Capsule())
+                        .background(OrbitPalette.successSoft, in: Capsule())
                 }
                 AccountPlatformBadge(platform: account.platform)
             }
 
             Text(accountSubtitle)
-                .font(.caption)
+                .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-            if let statusSummary {
-                Label(statusSummary, systemImage: "gauge.with.dots.needle.67percent")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(account.platform == .claude ? L10n.tr("状态未同步") : L10n.tr("额度未同步"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            Label(statusSummary ?? fallbackStatusSummary, systemImage: "gauge.with.dots.needle.67percent")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(backgroundColor, in: RoundedRectangle(cornerRadius: OrbitRadius.panel, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: OrbitRadius.panel, style: .continuous)
+                .strokeBorder(borderColor, lineWidth: 1)
+        )
+        .overlay(alignment: .leading) {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(OrbitPalette.accent)
+                    .frame(width: 3, height: 34)
+                    .padding(.leading, 1)
+                    .transition(.opacity)
             }
         }
-        .padding(.vertical, 4)
+        .animation(.easeOut(duration: 0.14), value: isSelected)
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+        .onHover { hovering in
+            isHovering = hovering
+        }
     }
 
     private var accountSubtitle: String {
@@ -394,6 +448,33 @@ private struct AccountListRow: View {
         return nil
     }
 
+    private var fallbackStatusSummary: String {
+        account.platform == .claude ? L10n.tr("状态未同步") : L10n.tr("额度未同步")
+    }
+
+    private var backgroundColor: Color {
+        if isSelected {
+            return OrbitPalette.panel
+        }
+        if account.isActive {
+            return OrbitPalette.panelMuted
+        }
+        if isHovering {
+            return OrbitPalette.panel
+        }
+        return Color.clear
+    }
+
+    private var borderColor: Color {
+        if isSelected {
+            return OrbitPalette.accent.opacity(0.22)
+        }
+        if isHovering {
+            return Color.black.opacity(0.08)
+        }
+        return Color.clear
+    }
+
     private func claudeRemainingText(_ value: Int?) -> String {
         guard let value else { return L10n.tr("未知") }
         return "\(value)"
@@ -415,41 +496,25 @@ private struct AccountDetailView: View {
     @State private var draftName = ""
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                quickActionSection
-
-                secondaryActionSection
-
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(L10n.tr("账号详情"))
-                        .font(.largeTitle.bold())
-
-                    HStack(alignment: .center, spacing: 12) {
-                        TextField(L10n.tr("显示名"), text: $draftName)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 280)
-                        Button(L10n.tr("保存名称")) {
-                            onRename(draftName)
-                        }
-                        .buttonStyle(.bordered)
+        GeometryReader { proxy in
+            ScrollView {
+                HStack(alignment: .top, spacing: OrbitSpacing.section) {
+                    VStack(alignment: .leading, spacing: OrbitSpacing.regular) {
+                        workspaceHeader
+                        quickActionSection
                     }
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
 
-                    infoGrid
+                    VStack(alignment: .leading, spacing: OrbitSpacing.regular) {
+                        inspectorPanel
+                        deleteSection
+                    }
+                    .frame(width: inspectorWidth(for: proxy.size.width), alignment: .topLeading)
                 }
-                .padding(24)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-                quotaSection
-
-                statusSection
-
-                pathSection
-
-                deleteSection
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(OrbitSpacing.section)
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .padding(24)
+            .background(OrbitPalette.workspace)
         }
         .onAppear {
             draftName = account.displayName
@@ -459,23 +524,50 @@ private struct AccountDetailView: View {
         }
     }
 
-    private var infoGrid: some View {
-        Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 10) {
-            infoRow(L10n.tr("账号类型"), account.authKind.displayName)
-            infoRow(L10n.tr("账号 ID"), account.accountIdentifier)
-            infoRow(credentialSummaryLabel, credentialSummaryValue)
-            infoRow(L10n.tr("套餐类型"), account.planType ?? L10n.tr("未知"))
-            if let codexUsageStatusText {
-                infoRow(L10n.tr("Codex 使用状态"), codexUsageStatusText)
+    private func inspectorWidth(for totalWidth: CGFloat) -> CGFloat {
+        min(336, max(280, totalWidth * 0.34))
+    }
+
+    private var workspaceHeader: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(L10n.tr("当前账号"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Text(account.displayName)
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .lineLimit(2)
+
+            Text(workspaceDescription)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                AccountPlatformBadge(platform: account.platform)
+
+                if account.isActive {
+                    Text(L10n.tr("当前"))
+                        .font(.caption.bold())
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(OrbitPalette.successSoft, in: Capsule())
+                }
+
+                Text(account.planType ?? account.authKind.displayName)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color.primary.opacity(0.05), in: Capsule())
             }
-            if let codexAvailabilityText {
-                infoRow(L10n.tr("可用性"), codexAvailabilityText)
+
+            if let workspaceStatusText {
+                Text(workspaceStatusText)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
             }
-            if let codexLimitStatusText {
-                infoRow(L10n.tr("额度限制"), codexLimitStatusText)
-            }
-            infoRow(L10n.tr("最后刷新"), account.lastRefreshAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知"))
-            infoRow(L10n.tr("最后使用"), account.lastUsedAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("从未"))
         }
     }
 
@@ -497,6 +589,43 @@ private struct AccountDetailView: View {
         case .chatgptOAuth, .openAICompatible, .claudeCompatible:
             return account.email ?? L10n.tr("未解析")
         }
+    }
+
+    private var headerSummary: String {
+        switch account.providerRule {
+        case .chatgptOAuth:
+            return account.email ?? account.accountIdentifier
+        case .openAICompatible, .claudeCompatible:
+            return account.resolvedProviderDisplayName
+        case .claudeProfile:
+            return L10n.tr("本地 Profile")
+        }
+    }
+
+    private var workspaceDescription: String {
+        if account.displayName != headerSummary {
+            return headerSummary
+        }
+        switch account.providerRule {
+        case .chatgptOAuth:
+            return L10n.tr("已接入 ChatGPT 凭据，可直接从当前账号启动本地 CLI。")
+        case .openAICompatible:
+            return L10n.tr("当前账号会按保存的 OpenAI 兼容 provider、模型和桥接方式启动。")
+        case .claudeCompatible:
+            return L10n.tr("当前账号会按保存的 Claude 兼容 provider、模型和 API Key 启动。")
+        case .claudeProfile:
+            return L10n.tr("当前账号会直接复用已保存的本地 Claude Profile。")
+        }
+    }
+
+    private var workspaceStatusText: String? {
+        if let snapshot {
+            return L10n.tr("剩余 %@", snapshot.remainingSummary)
+        }
+        if let claudeSnapshot {
+            return L10n.tr("请求剩余 %@", claudeValueSummary(claudeSnapshot.requests))
+        }
+        return nil
     }
 
     private var codexUsageStatusText: String? {
@@ -526,95 +655,32 @@ private struct AccountDetailView: View {
         return details.limitStatusText
     }
 
-    private func infoRow(_ label: String, _ value: String) -> some View {
-        GridRow {
+    private func inspectorRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
             Text(label)
+                .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
+                .frame(width: 76, alignment: .leading)
+
             Text(value)
+                .font(.callout)
                 .textSelection(.enabled)
-        }
-    }
-
-    private var quotaSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(account.platform == .codex ? L10n.tr("额度快照") : L10n.tr("限额快照"))
-                .font(.title2.bold())
-
-            if account.platform == .codex {
-                if let snapshot {
-                    Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 10) {
-                        infoRow(L10n.tr("5 小时剩余"), snapshot.primary.remainingPercentText)
-                        infoRow(L10n.tr("7 天剩余"), snapshot.secondary.remainingPercentText)
-                        infoRow(L10n.tr("口径"), L10n.tr("剩余百分比（与 Codex 状态面板一致）"))
-                        infoRow(L10n.tr("计划类型"), snapshot.planType ?? L10n.tr("未知"))
-                        infoRow(L10n.tr("来源"), snapshot.source.displayName)
-                        infoRow(L10n.tr("采集时间"), snapshot.capturedAt.formatted(date: .abbreviated, time: .standard))
-                        infoRow(L10n.tr("5 小时重置"), snapshot.primary.resetsAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知"))
-                        infoRow(L10n.tr("7 天重置"), snapshot.secondary.resetsAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知"))
-                        if let credits = snapshot.credits {
-                            infoRow(L10n.tr("Credits"), credits.unlimited ? L10n.tr("unlimited") : (credits.balance.map { "\($0)" } ?? L10n.tr("无")))
-                        }
-                    }
-                    .padding(24)
-                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                } else {
-                    Text(L10n.tr("这个账号还没有被可靠归档的本地额度快照。切换到该账号并实际使用一段时间后，应用会从本地会话事件中抓取额度。"))
-                        .foregroundStyle(.secondary)
-                        .padding(24)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                }
-            } else {
-                if let claudeSnapshot {
-                    Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 10) {
-                        infoRow(L10n.tr("Requests"), claudeValueSummary(claudeSnapshot.requests))
-                        infoRow(L10n.tr("Requests 重置"), formattedDate(claudeSnapshot.requests.resetAt))
-                        infoRow(L10n.tr("Input Tokens"), claudeValueSummary(claudeSnapshot.inputTokens))
-                        infoRow(L10n.tr("Input Tokens 重置"), formattedDate(claudeSnapshot.inputTokens.resetAt))
-                        infoRow(L10n.tr("Output Tokens"), claudeValueSummary(claudeSnapshot.outputTokens))
-                        infoRow(L10n.tr("Output Tokens 重置"), formattedDate(claudeSnapshot.outputTokens.resetAt))
-                        infoRow(L10n.tr("来源"), claudeSnapshot.source.displayName)
-                        infoRow(L10n.tr("采集时间"), claudeSnapshot.capturedAt.formatted(date: .abbreviated, time: .standard))
-                    }
-                    .padding(24)
-                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                } else if account.authKind == .claudeProfile {
-                    Text(L10n.tr("这是本地 Claude Profile；应用不会在线刷新 claude.ai 登录态，可直接从应用启动 Claude CLI 验证。"))
-                        .foregroundStyle(.secondary)
-                        .padding(24)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                } else {
-                    Text(L10n.tr("还没有刷新过 Anthropic 限额。手动更新状态后，应用会读取响应头中的 requests 和 token 限额信息。"))
-                        .foregroundStyle(.secondary)
-                        .padding(24)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                }
-            }
-        }
-    }
-
-    private var statusSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(L10n.tr("账号状态"))
-                .font(.title2.bold())
-
-            Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 10) {
-                infoRow(L10n.tr("上次检查"), account.lastStatusCheckAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("尚未手动更新"))
-                infoRow(L10n.tr("最近结果"), account.lastStatusMessage ?? L10n.tr("尚未手动更新"))
-                infoRow(L10n.tr("说明"), statusDescriptionText)
-            }
-            .padding(24)
-            .background(statusBackgroundColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private var quickActionSection: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .center, spacing: 16) {
-                Text(L10n.tr("打开 CLI"))
-                    .font(.title2.bold())
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L10n.tr("打开 CLI"))
+                        .font(.title2.bold())
+
+                    Text(cliLaunchHelpText)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 Spacer(minLength: 12)
 
@@ -634,6 +700,10 @@ private struct AccountDetailView: View {
                 .frame(width: 220)
             }
 
+            Rectangle()
+                .fill(Color.white.opacity(0.5))
+                .frame(height: 1)
+
             Button {
                 chooseDirectoryAndOpenCLI()
             } label: {
@@ -647,16 +717,11 @@ private struct AccountDetailView: View {
                         .font(.callout.weight(.semibold))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .disabled(isCLIActionDisabled)
-
-            Text(cliLaunchHelpText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
 
             Divider()
 
@@ -668,7 +733,7 @@ private struct AccountDetailView: View {
                     Text(L10n.tr("先选择一个目录打开 %@，后续会在这里快速重开。", selectedCLITarget.displayName))
                         .foregroundStyle(.secondary)
                 } else {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 8) {
                         ForEach(recentCLILaunches) { record in
                             CLIDirectoryHistoryCard(
                                 record: record,
@@ -684,65 +749,123 @@ private struct AccountDetailView: View {
                     }
                 }
 
-                Button(L10n.tr("浏览其他目录...")) {
-                    chooseDirectoryAndOpenCLI()
+                HStack(spacing: 12) {
+                    Button(L10n.tr("浏览其他目录...")) {
+                        chooseDirectoryAndOpenCLI()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Color.accentColor)
+                    .disabled(isCLIActionDisabled)
+
+                    if shouldShowIsolatedInstanceAction {
+                        Button(isolatedInstanceButtonTitle) {
+                            Task { await model.launchIsolatedCodex(for: account) }
+                        }
+                        .buttonStyle(.plain)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .disabled(isIsolatedInstanceActionDisabled)
+                    }
                 }
-                .buttonStyle(.plain)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(Color.accentColor)
-                .disabled(isCLIActionDisabled)
             }
 
-            if shouldShowIsolatedInstanceAction {
-                Button(isolatedInstanceButtonTitle) {
-                    Task { await model.launchIsolatedCodex(for: account) }
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L10n.tr("快捷操作"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    Button(model.isRefreshingStatus(for: account.id) ? L10n.tr("正在更新状态...") : L10n.tr("手动更新状态")) {
+                        onRefreshStatus()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(model.isRefreshingStatus(for: account.id) || model.isRefreshingAllStatuses || model.isSwitchInProgress)
+
+                    Button(switchButtonTitle) {
+                        onSwitch()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(account.isActive || model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
                 }
-                .buttonStyle(.plain)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
-                .disabled(isIsolatedInstanceActionDisabled)
+
+                HStack(spacing: 10) {
+                    if model.canEditProviderAccount(account) {
+                        Button(L10n.tr("编辑供应商")) {
+                            onEditProvider()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
+                    }
+
+                    if model.shouldOfferRestartCodex(for: account) {
+                        Button(model.isRestartingCodex ? L10n.tr("正在重启 Codex...") : L10n.tr("重启 Codex")) {
+                            Task { await model.performBannerAction(.restartCodex) }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(model.isRestartingCodex)
+                    }
+                }
             }
         }
-        .padding(20)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(24)
+        .orbitSurface(.accent, radius: OrbitRadius.hero)
     }
 
-    private var secondaryActionSection: some View {
-        HStack(spacing: 12) {
-            Button(model.isRefreshingStatus(for: account.id) ? L10n.tr("正在更新状态...") : L10n.tr("手动更新状态")) {
-                onRefreshStatus()
-            }
-            .buttonStyle(.bordered)
-            .disabled(model.isRefreshingStatus(for: account.id) || model.isRefreshingAllStatuses || model.isSwitchInProgress)
+    private var inspectorPanel: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(L10n.tr("账号详情"))
+                .font(.title3.bold())
 
-            Button(switchButtonTitle) {
-                onSwitch()
-            }
-            .buttonStyle(.bordered)
-            .disabled(account.isActive || model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
-
-            if model.canEditProviderAccount(account) {
-                Button(L10n.tr("编辑供应商")) {
-                    onEditProvider()
+            HStack(alignment: .center, spacing: 10) {
+                TextField(L10n.tr("显示名"), text: $draftName)
+                    .textFieldStyle(.roundedBorder)
+                Button(L10n.tr("保存名称")) {
+                    onRename(draftName)
                 }
                 .buttonStyle(.bordered)
-                .disabled(model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
             }
 
-            if model.shouldOfferRestartCodex(for: account) {
-                Button(model.isRestartingCodex ? L10n.tr("正在重启 Codex...") : L10n.tr("重启 Codex")) {
-                    Task { await model.performBannerAction(.restartCodex) }
+            VStack(alignment: .leading, spacing: 12) {
+                inspectorRow(L10n.tr("账号类型"), account.authKind.displayName)
+                inspectorRow(L10n.tr("账号 ID"), account.accountIdentifier)
+                inspectorRow(credentialSummaryLabel, credentialSummaryValue)
+                inspectorRow(L10n.tr("套餐类型"), account.planType ?? L10n.tr("未知"))
+
+                if let codexUsageStatusText {
+                    inspectorRow(L10n.tr("Codex 使用状态"), codexUsageStatusText)
                 }
-                .buttonStyle(.bordered)
-                .disabled(model.isRestartingCodex)
+                if let codexAvailabilityText {
+                    inspectorRow(L10n.tr("可用性"), codexAvailabilityText)
+                }
+                if let codexLimitStatusText {
+                    inspectorRow(L10n.tr("额度限制"), codexLimitStatusText)
+                }
+
+                inspectorRow(L10n.tr("最后刷新"), account.lastRefreshAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知"))
+                inspectorRow(L10n.tr("最后使用"), account.lastUsedAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("从未"))
             }
+
+            Divider()
+            quotaSection
+            Divider()
+            statusSection
+            Divider()
+            pathSection
         }
+        .padding(.top, 8)
     }
 
     private var deleteSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             Text(L10n.tr("删除账号"))
-                .font(.title2.bold())
+                .font(.headline.bold())
 
             Button(L10n.tr("删除账号"), role: .destructive) {
                 onDelete()
@@ -750,6 +873,9 @@ private struct AccountDetailView: View {
             .buttonStyle(.bordered)
             .disabled(model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
         }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .orbitSurface(.danger)
     }
 
     private var switchButtonTitle: String {
@@ -884,25 +1010,126 @@ private struct AccountDetailView: View {
         }
     }
 
+    private var quotaSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(account.platform == .codex ? L10n.tr("额度快照") : L10n.tr("限额快照"))
+                .font(.headline)
+
+            if account.platform == .codex {
+                if let snapshot {
+                    HStack(spacing: 10) {
+                        quotaStat(title: L10n.tr("5 小时剩余"), value: snapshot.primary.remainingPercentText)
+                        quotaStat(title: L10n.tr("7 天剩余"), value: snapshot.secondary.remainingPercentText)
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        inspectorRow(L10n.tr("口径"), L10n.tr("剩余百分比（与 Codex 状态面板一致）"))
+                        inspectorRow(L10n.tr("计划类型"), snapshot.planType ?? L10n.tr("未知"))
+                        inspectorRow(L10n.tr("来源"), snapshot.source.displayName)
+                        inspectorRow(L10n.tr("采集时间"), snapshot.capturedAt.formatted(date: .abbreviated, time: .standard))
+                        inspectorRow(L10n.tr("5 小时重置"), snapshot.primary.resetsAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知"))
+                        inspectorRow(L10n.tr("7 天重置"), snapshot.secondary.resetsAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知"))
+
+                        if let credits = snapshot.credits {
+                            inspectorRow(L10n.tr("Credits"), credits.unlimited ? L10n.tr("unlimited") : (credits.balance.map { "\($0)" } ?? L10n.tr("无")))
+                        }
+                    }
+                } else {
+                    Text(L10n.tr("这个账号还没有被可靠归档的本地额度快照。切换到该账号并实际使用一段时间后，应用会从本地会话事件中抓取额度。"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .orbitSurface(.warning)
+                }
+            } else if let claudeSnapshot {
+                VStack(alignment: .leading, spacing: 10) {
+                    inspectorRow(L10n.tr("Requests"), claudeValueSummary(claudeSnapshot.requests))
+                    inspectorRow(L10n.tr("Requests 重置"), formattedDate(claudeSnapshot.requests.resetAt))
+                    inspectorRow(L10n.tr("Input Tokens"), claudeValueSummary(claudeSnapshot.inputTokens))
+                    inspectorRow(L10n.tr("Input Tokens 重置"), formattedDate(claudeSnapshot.inputTokens.resetAt))
+                    inspectorRow(L10n.tr("Output Tokens"), claudeValueSummary(claudeSnapshot.outputTokens))
+                    inspectorRow(L10n.tr("Output Tokens 重置"), formattedDate(claudeSnapshot.outputTokens.resetAt))
+                    inspectorRow(L10n.tr("来源"), claudeSnapshot.source.displayName)
+                    inspectorRow(L10n.tr("采集时间"), claudeSnapshot.capturedAt.formatted(date: .abbreviated, time: .standard))
+                }
+            } else if account.authKind == .claudeProfile {
+                Text(L10n.tr("这是本地 Claude Profile；应用不会在线刷新 claude.ai 登录态，可直接从应用启动 Claude CLI 验证。"))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .orbitSurface(.warning)
+            } else {
+                Text(L10n.tr("还没有刷新过 Anthropic 限额。手动更新状态后，应用会读取响应头中的 requests 和 token 限额信息。"))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .orbitSurface(.warning)
+            }
+        }
+    }
+
+    private func quotaStat(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3.weight(.bold))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(OrbitPalette.panelMuted, in: RoundedRectangle(cornerRadius: OrbitRadius.row, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: OrbitRadius.row, style: .continuous)
+                .strokeBorder(OrbitPalette.divider, lineWidth: 1)
+        )
+    }
+
     private var pathSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(account.platform == .codex ? L10n.tr("当前写入路径") : L10n.tr("配置路径"))
-                .font(.title2.bold())
+                .font(.headline)
+
             Text(authFilePath)
                 .font(.callout.monospaced())
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .orbitSurface()
         }
     }
 
-    private var statusBackgroundColor: Color {
+    private var statusTone: OrbitSurfaceTone {
         switch account.lastStatusLevel ?? .info {
         case .info:
-            return Color.green.opacity(0.08)
+            return .success
         case .warning:
-            return Color.yellow.opacity(0.12)
+            return .warning
         case .error:
-            return Color.red.opacity(0.12)
+            return .danger
+        }
+    }
+
+    private var statusSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.tr("账号状态"))
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 10) {
+                inspectorRow(L10n.tr("上次检查"), account.lastStatusCheckAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("尚未手动更新"))
+                inspectorRow(L10n.tr("最近结果"), account.lastStatusMessage ?? L10n.tr("尚未手动更新"))
+                inspectorRow(L10n.tr("说明"), statusDescriptionText)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .orbitSurface(statusTone)
         }
     }
 
@@ -977,12 +1204,11 @@ private struct CLIDirectoryHistoryCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(backgroundColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(backgroundColor, in: RoundedRectangle(cornerRadius: OrbitRadius.row, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: OrbitRadius.row, style: .continuous)
                 .strokeBorder(overlayColor, lineWidth: isHovering && !isDisabled ? 1 : 0)
         )
-        .scaleEffect(isHovering && !isDisabled ? 1.01 : 1)
         .animation(.easeOut(duration: 0.12), value: isHovering)
         .onHover { hovering in
             isHovering = hovering
@@ -991,13 +1217,13 @@ private struct CLIDirectoryHistoryCard: View {
 
     private var backgroundColor: Color {
         if isDisabled {
-            return Color.secondary.opacity(0.08)
+            return Color.white.opacity(0.4)
         }
-        return isHovering ? Color.accentColor.opacity(0.16) : Color.accentColor.opacity(0.08)
+        return isHovering ? Color.white.opacity(0.95) : Color.white.opacity(0.78)
     }
 
     private var overlayColor: Color {
-        Color.accentColor.opacity(0.35)
+        isHovering ? OrbitPalette.accent.opacity(0.2) : Color.black.opacity(0.05)
     }
 }
 
@@ -1007,8 +1233,10 @@ private struct BannerView: View {
     let onAction: (BannerAction) -> Void
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             Image(systemName: iconName)
+                .font(.headline)
+                .foregroundStyle(iconColor)
             Text(state.message)
                 .lineLimit(2)
             Spacer()
@@ -1039,11 +1267,22 @@ private struct BannerView: View {
     private var backgroundColor: Color {
         switch state.level {
         case .info:
-            return .green.opacity(0.16)
+            return OrbitPalette.successSoft
         case .warning:
-            return .yellow.opacity(0.18)
+            return OrbitPalette.warningSoft
         case .error:
-            return .red.opacity(0.18)
+            return OrbitPalette.dangerSoft
+        }
+    }
+
+    private var iconColor: Color {
+        switch state.level {
+        case .info:
+            return .green
+        case .warning:
+            return .yellow
+        case .error:
+            return .red
         }
     }
 }

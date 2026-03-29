@@ -362,3 +362,10 @@
 "此模式不会要求 Claude 登录；当前账号是 Codex 时，会默认自动继承该账号的 Codex 环境。若来源环境本身使用当前账号凭据，会直接复用当前 Codex OAuth 或 API Key；你也可以手动指定一个覆盖来源环境。" = "This mode does not require Claude login. When the current account is Codex, it automatically inherits that account's Codex environment. If the source environment uses account credentials, it directly reuses the current Codex OAuth or API key. You can still choose an override source environment manually.";
 "限额快照" = "Rate Limit Snapshot";
 "将删除账号“%@”的本地管理记录。" = "This will delete the local record for account \"%@\".";
+"本地 LLM 账号工作台" = "Local LLM Account Workspace";
+"当前账号" = "Current Account";
+"已接入 ChatGPT 凭据，可直接从当前账号启动本地 CLI。" = "ChatGPT credentials are connected. Launch the local CLI directly from this account.";
+"当前账号会按保存的 OpenAI 兼容 provider、模型和桥接方式启动。" = "This account launches with the saved OpenAI-compatible provider, model, and bridge path.";
+"当前账号会按保存的 Claude 兼容 provider、模型和 API Key 启动。" = "This account launches with the saved Claude-compatible provider, model, and API key.";
+"当前账号会直接复用已保存的本地 Claude Profile。" = "This account directly reuses the saved local Claude Profile.";
+"点击底部按钮开始浏览器登录。" = "Use the button below to start browser sign-in.";
