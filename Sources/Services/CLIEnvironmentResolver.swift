@@ -273,11 +273,12 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 throw CLIEnvironmentResolverError.missingCodexPayload
             }
             let model = account.resolvedDefaultModel.isEmpty ? "gpt-5.4" : account.resolvedDefaultModel
+            let availableModels = codexOAuthBridgeAvailableModels(defaultModel: model)
             let bridge = try await codexOAuthClaudeBridgeManager.prepareBridge(
                 accountID: account.id,
                 source: .codexAuthPayload(codexAuthPayload),
                 model: model,
-                availableModels: [model]
+                availableModels: availableModels
             )
             return try resolvedBridgedClaudeContext(
                 for: account,
@@ -291,7 +292,7 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                     baseURL: bridge.baseURL,
                     apiKeyEnvName: bridge.apiKeyEnvName,
                     apiKey: bridge.apiKey,
-                    availableModels: [model]
+                    availableModels: availableModels
                 )
             )
         case .openAICompatible:
@@ -455,6 +456,20 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
         case .openAICompatible:
             return providerIdentifier != "openai"
         }
+    }
+
+    private func codexOAuthBridgeAvailableModels(defaultModel: String) -> [String] {
+        mergedAvailableModels(
+            [
+                "gpt-5.3-codex",
+                "gpt-5.4",
+                "gpt-5.2-codex",
+                "gpt-5.1-codex-max",
+                "gpt-5.2",
+                "gpt-5.1-codex-mini",
+            ],
+            defaultModel: defaultModel
+        )
     }
 
     private func fetchModelIDs(

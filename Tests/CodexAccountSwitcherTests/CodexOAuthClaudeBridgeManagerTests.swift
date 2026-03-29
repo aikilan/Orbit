@@ -275,4 +275,36 @@ final class CodexOAuthClaudeBridgeManagerTests: XCTestCase {
 
         XCTAssertEqual(models.compactMap { $0["id"] as? String }, ["gpt-5.4"])
     }
+
+    func testModelsEndpointReturnsAvailableModelsForCodexOAuthBridge() async throws {
+        let manager = CodexOAuthClaudeBridgeManager(
+            sendUpstreamRequest: { _, _ in
+                XCTFail("不应该触发上游请求")
+                return CodexOAuthClaudeBridgeUpstreamResponse(
+                    statusCode: 200,
+                    body: Data("{}".utf8)
+                )
+            }
+        )
+
+        let bridge = try await manager.prepareBridge(
+            accountID: UUID(),
+            source: .codexAuthPayload(CodexAuthPayload(authMode: .openAIAPIKey, openAIAPIKey: "sk-test")),
+            model: "gpt-5.4",
+            availableModels: [
+                "gpt-5.3-codex",
+                "gpt-5.4",
+                "gpt-5.2-codex",
+            ]
+        )
+
+        let session = URLSession(configuration: .ephemeral)
+        let (data, response) = try await session.data(from: try XCTUnwrap(URL(string: "\(bridge.baseURL)/v1/models")))
+        let httpResponse = try XCTUnwrap(response as? HTTPURLResponse)
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let models = try XCTUnwrap(object["data"] as? [[String: Any]])
+
+        XCTAssertEqual(httpResponse.statusCode, 200)
+        XCTAssertEqual(models.compactMap { $0["id"] as? String }, ["gpt-5.3-codex", "gpt-5.4", "gpt-5.2-codex"])
+    }
 }

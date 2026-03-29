@@ -131,6 +131,59 @@ final class CLIEnvironmentResolverTests: XCTestCase {
         XCTAssertEqual(snapshot, ["gpt-5.4"])
     }
 
+    func testResolveClaudeContextUsesCodexModelCatalogForChatGPTOAuthBridge() async throws {
+        let resolver = CLIEnvironmentResolver(session: makeSession())
+        let bridgeManager = RecordingResolverCodexOAuthClaudeBridgeManager()
+        let paths = try makePaths()
+        let account = ManagedAccount(
+            id: UUID(),
+            platform: .codex,
+            accountIdentifier: UUID().uuidString,
+            displayName: "ChatGPT",
+            email: "user@example.com",
+            authKind: .chatgpt,
+            providerRule: .chatgptOAuth,
+            providerPresetID: nil,
+            providerDisplayName: nil,
+            providerBaseURL: nil,
+            providerAPIKeyEnvName: nil,
+            defaultModel: "gpt-5.4",
+            createdAt: Date(),
+            lastUsedAt: nil,
+            lastQuotaSnapshotAt: nil,
+            lastRefreshAt: nil,
+            planType: nil,
+            lastStatusCheckAt: nil,
+            lastStatusMessage: nil,
+            lastStatusLevel: nil,
+            isActive: true
+        )
+
+        _ = try await resolver.resolveClaudeContext(
+            for: account,
+            workingDirectoryURL: FileManager.default.temporaryDirectory,
+            appPaths: paths,
+            codexAuthPayload: CodexAuthPayload(authMode: .openAIAPIKey, openAIAPIKey: "sk-chatgpt-test"),
+            credential: nil,
+            claudeProfileManager: ResolverClaudeProfileManager(),
+            claudePatchedRuntimeManager: ResolverPatchedRuntimeManager(),
+            codexOAuthClaudeBridgeManager: bridgeManager
+        )
+
+        let snapshot = await bridgeManager.snapshot()
+        XCTAssertEqual(
+            snapshot,
+            [
+                "gpt-5.3-codex",
+                "gpt-5.4",
+                "gpt-5.2-codex",
+                "gpt-5.1-codex-max",
+                "gpt-5.2",
+                "gpt-5.1-codex-mini",
+            ]
+        )
+    }
+
     func testResolveCodexContextSkipsPrefetchForCustomProvider() async throws {
         ResolverMockURLProtocol.requestHandler = { _ in
             XCTFail("custom provider 不应该触发模型预查询")
