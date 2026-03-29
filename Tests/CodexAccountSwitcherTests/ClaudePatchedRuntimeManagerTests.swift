@@ -37,6 +37,7 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
         XCTAssertTrue(wrapperContents.contains("package/cli.js"))
         XCTAssertTrue(wrapperContents.contains("/node"))
         XCTAssertTrue(patchedCLIContents.contains("ANTHROPIC_CUSTOM_MODEL_OPTION"))
+        XCTAssertTrue(patchedCLIContents.contains("__managedAvailableModels"))
         XCTAssertTrue(patchedCLIContents.contains(".string().optional()"))
         XCTAssertTrue(patchedCLIContents.contains("typeof K===\"string\""))
         XCTAssertTrue(patchedCLIContents.contains("CLAUDE_CODE_CONTEXT_LIMIT"))
@@ -99,6 +100,7 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
         function O7(){return{}}
         function mj8(q){return q}
         function P66(q){let K=O7()||{availableModels:[]};return!0}
+        function f68(q){if(!(O7()||{}).availableModels)return q;return q.filter((_)=>_.value===null||_.value!==null&&P66(_.value))}
         function sample(){return h.object({subagent_type:h.string().optional(),model:h.enum(["sonnet","opus","haiku"]).optional().describe("Optional model override for this agent. Takes precedence over the agent definition's model frontmatter. If omitted, uses the agent definition's model, or inherits from the parent."),run_in_background:h.boolean().optional()})}
         var af1=200000,sF4=20000;
         """.write(to: cliURL, atomically: true, encoding: .utf8)
@@ -130,6 +132,7 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
 
         XCTAssertTrue(patchedCLIContents.contains("model:h.string().optional().describe(\"Optional model override for this agent."))
         XCTAssertTrue(patchedCLIContents.contains("ANTHROPIC_CUSTOM_MODEL_OPTION"))
+        XCTAssertTrue(patchedCLIContents.contains("__managedAvailableModels"))
         XCTAssertTrue(patchedCLIContents.contains("CLAUDE_CODE_CONTEXT_LIMIT"))
     }
 
@@ -186,6 +189,7 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
         let patchedCLIContents = try String(contentsOf: patchedCLIURL, encoding: .utf8)
 
         XCTAssertTrue(patchedCLIContents.contains("function Y66(q){if(q&&process.env.ANTHROPIC_CUSTOM_MODEL_OPTION&&String(q).trim().toLowerCase()===process.env.ANTHROPIC_CUSTOM_MODEL_OPTION.trim().toLowerCase())return!0;"))
+        XCTAssertTrue(patchedCLIContents.contains("function f68(q){let __managedAvailableModels=(J7()||{}).availableModels;if(!__managedAvailableModels)return q;"))
         XCTAssertTrue(patchedCLIContents.contains("model:h.string().optional().describe(\"Optional model override for this agent."))
         XCTAssertTrue(patchedCLIContents.contains("var c01=(+process.env.CLAUDE_CODE_CONTEXT_LIMIT||200000),Ev4=20000"))
     }
@@ -206,6 +210,7 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
         function O7(){return{}}
         function mj8(q){return q}
         function P66(q){let K=O7()||{availableModels:[]};return!0}
+        function f68(q){if(!(O7()||{}).availableModels)return q;return q.filter((_)=>_.value===null||_.value!==null&&P66(_.value))}
         function sample(){return {schema:{foo:1,model:u.enum(oEH).optional()}}}
         );let J=K&&typeof K==="string"&&oEH.includes(K)
         var af1=200000,sF4=20000;

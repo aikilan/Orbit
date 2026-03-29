@@ -19,6 +19,8 @@ enum ClaudePatchedRuntimeManagerError: LocalizedError, Equatable {
 }
 
 struct ClaudePatchedRuntimeManager: @unchecked Sendable {
+    private static let patchVersion = "2026-03-29-model-picker-v1"
+
     private struct SourceInstallation {
         let originalExecutableURL: URL
         let packageRootURL: URL
@@ -115,7 +117,7 @@ struct ClaudePatchedRuntimeManager: @unchecked Sendable {
         model: String,
         appSupportDirectoryURL: URL
     ) -> URL {
-        let cacheKeyInput = "\(installation.version)\n\(installation.packageRootURL.path)\n\(model)"
+        let cacheKeyInput = "\(Self.patchVersion)\n\(installation.version)\n\(installation.packageRootURL.path)\n\(model)"
         let cacheKey = SHA256.hash(data: Data(cacheKeyInput.utf8))
             .compactMap { String(format: "%02x", $0) }
             .joined()
@@ -163,6 +165,7 @@ struct ClaudePatchedRuntimeManager: @unchecked Sendable {
     private func patchCLIContents(_ contents: String, model: String) throws -> String {
         var patchedContents = contents
         patchedContents = try patchCustomModelValidation(in: patchedContents)
+        patchedContents = try patchModelPickerOptions(in: patchedContents)
         patchedContents = try patchCustomAgentModels(in: patchedContents)
         patchedContents = patchContextLimit(in: patchedContents)
         _ = model
@@ -272,6 +275,26 @@ struct ClaudePatchedRuntimeManager: @unchecked Sendable {
         return updated.replacingCharacters(
             in: Range(validMatch.range, in: updated)!,
             with: "\(boundary)let \(flagVar)=\(modelVar)&&typeof \(modelVar)===\"string\""
+        )
+    }
+
+    private func patchModelPickerOptions(in contents: String) throws -> String {
+        if contents.contains("__managedAvailableModels") {
+            return contents
+        }
+
+        let pattern = try NSRegularExpression(
+            pattern: #"function\s+([$\w]+)\(([$\w]+)\)\{if\(!\(([$\w]+)\(\)\|\|\{\}\)\.availableModels\)return\s+\2;return\s+\2\.filter\(\(([$\w]+)\)=>\4\.value===null\|\|\4\.value!==null&&([$\w]+)\(\4\.value\)\)\}"#
+        )
+        let range = NSRange(contents.startIndex..., in: contents)
+        guard pattern.firstMatch(in: contents, range: range) != nil else {
+            throw ClaudePatchedRuntimeManagerError.patchFailed(L10n.tr("没有找到模型菜单补丁点。"))
+        }
+
+        return pattern.stringByReplacingMatches(
+            in: contents,
+            range: range,
+            withTemplate: #"function $1($2){let __managedAvailableModels=($3()||{}).availableModels;if(!__managedAvailableModels)return $2;for(let __managedModel of __managedAvailableModels)if(__managedModel&&!$2.some((__managedOption)=>__managedOption.value===__managedModel)){let __managedResolvedOption=typeof _8z==="function"?_8z(__managedModel):null;$2.push(__managedResolvedOption??{value:__managedModel,label:__managedModel,description:"Custom model"})}return $2.filter(($4)=>$4.value===null||$4.value!==null&&$5($4.value))}"#
         )
     }
 
