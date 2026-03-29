@@ -23,19 +23,19 @@ It targets macOS 14 or later. If you build from Terminal, use a Swift 6 toolchai
 
 ### Unified Account Workspace
 
-![Orbit workspace](./example/static/workspace.png)
+![Orbit workspace](https://raw.githubusercontent.com/aikilan/Orbit/refs/heads/main/example/static/workspace.png)
 
 The main workspace keeps account switching, account details, quota snapshots, status logs, recent directories, and CLI target selection in one view. You can review the current account and decide whether the next launch should open Codex CLI or Claude Code.
 
 ### Codex CLI With an OpenAI-Compatible Provider
 
-![Codex CLI with a GLM-style provider](./example/static/codex-use-glm.png)
+![Codex CLI with a GLM-style provider](https://raw.githubusercontent.com/aikilan/Orbit/refs/heads/main/example/static/codex-use-glm.png)
 
 Orbit can launch Codex CLI with an OpenAI-compatible provider account, including GLM-style setups. The app injects the saved provider, model, and API key environment automatically, and starts a local bridge when the upstream only exposes `chat/completions` instead of the OpenAI Responses API.
 
 ### Claude Code With Bridged OpenAI/Codex Credentials
 
-![Claude Code with a bridged OpenAI/Codex model](./example/static/codex-use-claude.png)
+![Claude Code with a bridged OpenAI/Codex model](https://raw.githubusercontent.com/aikilan/Orbit/refs/heads/main/example/static/codex-use-claude.png)
 
 Orbit can also open Claude Code from a Codex or provider-backed account. It prepares the app-managed patched runtime, bridges the saved credentials into the Claude-side environment, and reuses the account's configured model flow without asking for a separate Claude login.
 
