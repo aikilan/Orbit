@@ -2,30 +2,42 @@
 
 [简体中文说明](README.zh-CN.md)
 
-Orbit is a native macOS menu bar app for managing local LLM account workspaces on one machine. This release keeps full Codex support, exposes a Claude placeholder entry, keeps local account metadata in one place, and switches the active Codex identity by atomically updating `~/.codex/auth.json`.
+Orbit is a native macOS workspace for managing local LLM accounts on one machine. It keeps Codex, Claude, and provider-backed accounts in one place, lets you inspect status and quota data, and launches Codex CLI or Claude Code with the right account, model, provider, and bridge path automatically.
 
-## Features
+It targets macOS 14 or later. If you build from Terminal, use a Swift 6 toolchain.
 
-- Manage local LLM account workspaces from a menu bar utility and a dedicated desktop window.
-- Switch between Codex and Claude platform views. Claude is visible as a placeholder in this release.
-- Add ChatGPT accounts through browser OAuth.
-- Add API key accounts for local credential switching.
-- Switch the active account without manually editing `~/.codex/auth.json`.
+## Core Features
+
+- Manage ChatGPT OAuth accounts, OpenAI-compatible provider API keys, Claude-compatible provider API keys, and switchable local Claude Profile snapshots from one app.
+- Launch Codex CLI or Claude Code from the selected account after choosing a working directory, then reopen recent directories from per-account history.
+- Switch the active Codex account by updating `~/.codex/auth.json` automatically, or launch non-active Codex accounts in isolated `CODEX_HOME` workspaces without rewriting the current global auth file.
+- Save provider-level settings on the account itself: provider rule, display name, Base URL, API key environment variable, and default model.
+- Automatically choose direct provider wiring or a local bridge when the upstream provider needs protocol translation.
+- Import the current `~/.claude` and `~/.claude.json` as a local Claude Profile, or save an Anthropic API key for Claude-side workflows.
 - Review account details such as plan type, Codex usage status, availability, quota limit state, last refresh time, and last used time.
-- Open Codex CLI directly from the selected account in the account detail view.
-- Choose a working directory before launching CLI, and reopen previously used directories from the per-account history list.
-- Use the current global `~/.codex` for the active account, or launch CLI with an isolated `CODEX_HOME` for other accounts without rewriting the global auth file.
-- Archive quota snapshots from local Codex artifacts: `~/.codex/sessions/*.jsonl` and `~/.codex/state_5.sqlite`.
-- Refresh online usage data for supported ChatGPT accounts through `/wham/usage`.
-- Recommend switching when the active account is running low on the 5-hour budget.
-- Detect stale live Codex sessions after a switch and suggest restarting Codex when needed.
-- Store app metadata in `~/Library/Application Support/Orbit/accounts.json` and cached credentials in `~/Library/Application Support/Orbit/credentials-cache.json` without Keychain prompts.
+- Archive local Codex quota snapshots from `~/.codex/sessions/*.jsonl` and `~/.codex/state_5.sqlite`, refresh supported online usage data, and recommend switching when the active 5-hour budget is low.
+- Detect stale live Codex sessions after a switch and suggest restarting Codex when the running app is still using the old credential.
+- Store app metadata under `~/Library/Application Support/Orbit/` without Keychain permission prompts.
 
-## Requirements
+## Screenshot Examples
 
-- macOS 14 or later
-- Swift 6 toolchain if you build from Terminal
-- A local Codex environment that uses `~/.codex`
+### Unified Account Workspace
+
+![Orbit workspace](./example/static/workspace.png)
+
+The main workspace keeps account switching, account details, quota snapshots, status logs, recent directories, and CLI target selection in one view. You can review the current account and decide whether the next launch should open Codex CLI or Claude Code.
+
+### Codex CLI With an OpenAI-Compatible Provider
+
+![Codex CLI with a GLM-style provider](./example/static/codex-use-glm.png)
+
+Orbit can launch Codex CLI with an OpenAI-compatible provider account, including GLM-style setups. The app injects the saved provider, model, and API key environment automatically, and starts a local bridge when the upstream only exposes `chat/completions` instead of the OpenAI Responses API.
+
+### Claude Code With Bridged OpenAI/Codex Credentials
+
+![Claude Code with a bridged OpenAI/Codex model](./example/static/codex-use-claude.png)
+
+Orbit can also open Claude Code from a Codex or provider-backed account. It prepares the app-managed patched runtime, bridges the saved credentials into the Claude-side environment, and reuses the account's configured model flow without asking for a separate Claude login.
 
 ## Commands
 
@@ -57,10 +69,10 @@ The packaging script writes these artifacts to `dist/`:
 - `assets/AppIcon-master.png`
 - `assets/MenuBarIcon-template.png`
 
-## Notes
+## Limitations and Notes
 
-- Quota values are shown as remaining percentage so they align with the Codex status panel.
-- Manual status refresh pulls online usage data first, and later local session events can still replace the snapshot with fresher data.
-- API key accounts support local switching, but not online usage refresh.
-- Claude is exposed as a platform entry only in this release. Real Claude authentication, switching, CLI launch, and quota sync are not implemented yet.
-- The app no longer depends on Keychain, so switching accounts and opening the main window should not trigger credential permission prompts.
+- Claude currently supports local Claude Profile import, Anthropic API key management, and Claude CLI / Claude Code launch. `claude.ai` OAuth switching is not supported.
+- A Claude Profile entry is only a local snapshot of `~/.claude` and `~/.claude.json`; it does not represent the official `claude.ai` or Console sign-in state.
+- Some providers do not expose the OpenAI Responses API directly. Orbit can still launch supported workflows by starting a local bridge, but this README documents launch behavior rather than provider-specific compatibility guarantees.
+- API key accounts support local credential switching. Online quota refresh depends on the provider or account type.
+- Manual refresh prefers online usage data when supported, while newer local session events can still replace the snapshot later.
