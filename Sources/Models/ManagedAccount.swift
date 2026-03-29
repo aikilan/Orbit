@@ -128,6 +128,15 @@ struct ManagedAccount: Identifiable, Codable, Hashable, Sendable {
 }
 
 extension ManagedAccount {
+    var accountListBadgeTitle: String {
+        if (providerRule == .openAICompatible || providerRule == .claudeCompatible),
+           let preset = ProviderCatalog.preset(id: providerPresetID),
+           !preset.isCustom {
+            return preset.displayName
+        }
+        return platform.displayName
+    }
+
     var resolvedProviderDisplayName: String {
         ProviderCatalog.providerDisplayName(
             presetID: providerPresetID,

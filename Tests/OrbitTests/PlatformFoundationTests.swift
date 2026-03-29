@@ -104,6 +104,56 @@ final class PlatformFoundationTests: XCTestCase {
         )
     }
 
+    func testAccountListBadgeTitleUsesPresetDisplayNameForPresetProviderAccount() {
+        let account = ManagedAccount(
+            id: UUID(),
+            platform: .codex,
+            accountIdentifier: "acct_deepseek",
+            displayName: "DeepSeek Account",
+            email: nil,
+            authKind: .providerAPIKey,
+            providerRule: .openAICompatible,
+            providerPresetID: "deepseek",
+            providerDisplayName: "Custom Name",
+            createdAt: Date(timeIntervalSince1970: 0),
+            lastUsedAt: nil,
+            lastQuotaSnapshotAt: nil,
+            lastRefreshAt: nil,
+            planType: nil,
+            lastStatusCheckAt: nil,
+            lastStatusMessage: nil,
+            lastStatusLevel: nil,
+            isActive: false
+        )
+
+        XCTAssertEqual(account.accountListBadgeTitle, "DeepSeek")
+    }
+
+    func testAccountListBadgeTitleFallsBackToPlatformForCustomProviderAccount() {
+        let account = ManagedAccount(
+            id: UUID(),
+            platform: .codex,
+            accountIdentifier: "acct_custom",
+            displayName: "Custom Provider",
+            email: nil,
+            authKind: .providerAPIKey,
+            providerRule: .openAICompatible,
+            providerPresetID: ProviderCatalog.customPresetID,
+            providerDisplayName: "My Gateway",
+            createdAt: Date(timeIntervalSince1970: 0),
+            lastUsedAt: nil,
+            lastQuotaSnapshotAt: nil,
+            lastRefreshAt: nil,
+            planType: nil,
+            lastStatusCheckAt: nil,
+            lastStatusMessage: nil,
+            lastStatusLevel: nil,
+            isActive: false
+        )
+
+        XCTAssertEqual(account.accountListBadgeTitle, "Codex")
+    }
+
     func testLegacyDatabaseDecodesAccountsAsCodexAndBumpsVersion() throws {
         let accountID = UUID()
         let json = """

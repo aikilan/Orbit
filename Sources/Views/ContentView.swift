@@ -352,10 +352,18 @@ struct ContentView: View {
 }
 
 private struct AccountPlatformBadge: View {
-    let platform: PlatformKind
+    let title: String
+
+    init(title: String) {
+        self.title = title
+    }
+
+    init(platform: PlatformKind) {
+        self.title = platform.displayName
+    }
 
     var body: some View {
-        Text(platform.displayName)
+        Text(title)
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 7)
@@ -389,7 +397,7 @@ private struct AccountListRow: View {
                         .padding(.vertical, 2)
                         .background(OrbitPalette.successSoft, in: Capsule())
                 }
-                AccountPlatformBadge(platform: account.platform)
+                AccountPlatformBadge(title: account.accountListBadgeTitle)
             }
 
             Text(accountSubtitle)
@@ -1342,7 +1350,7 @@ private struct MenuBarAccountRow: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1)
 
-                    AccountPlatformBadge(platform: account.platform)
+                    AccountPlatformBadge(title: account.accountListBadgeTitle)
                 }
 
                 if let summaryText {
