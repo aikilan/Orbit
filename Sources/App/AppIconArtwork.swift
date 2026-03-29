@@ -43,8 +43,8 @@ struct MenuBarStatusIcon: View {
         Image(nsImage: AppIconArtwork.menuBarIcon)
             .renderingMode(.original)
             .frame(width: 20, height: 20)
-            .accessibilityLabel(L10n.tr("LLM Account Switcher"))
-            .help(L10n.tr("LLM Account Switcher"))
+            .accessibilityLabel(L10n.tr("Orbit"))
+            .help(L10n.tr("Orbit"))
     }
 }
 

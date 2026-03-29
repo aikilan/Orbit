@@ -5,17 +5,17 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>zh_CN</string>
     <key>CFBundleDisplayName</key>
-    <string>LLM Account Switcher</string>
+    <string>Orbit</string>
     <key>CFBundleExecutable</key>
-    <string>LLMAccountSwitcher</string>
+    <string>Orbit</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>com.openai.LLMAccountSwitcher</string>
+    <string>com.openai.Orbit</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>LLM Account Switcher</string>
+    <string>Orbit</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

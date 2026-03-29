@@ -254,8 +254,8 @@ fileprivate final class CodexOAuthClaudeBridgeServer: @unchecked Sendable {
         }
     }
 
-    private let queue = DispatchQueue(label: "com.openai.CodexAccountSwitcher.claude-bridge")
-    private let stateQueue = DispatchQueue(label: "com.openai.CodexAccountSwitcher.claude-bridge.state")
+    private let queue = DispatchQueue(label: "com.openai.Orbit.claude-bridge")
+    private let stateQueue = DispatchQueue(label: "com.openai.Orbit.claude-bridge.state")
     private let sendUpstreamRequest: @Sendable (OpenAICompatibleClaudeBridgeSource, Data) async throws -> CodexOAuthClaudeBridgeUpstreamResponse
     private var listener: NWListener?
     private var baseURL: String?
@@ -289,7 +289,7 @@ fileprivate final class CodexOAuthClaudeBridgeServer: @unchecked Sendable {
 
         return try await withCheckedThrowingContinuation { continuation in
             let resumeState = ResumeState()
-            let resumeQueue = DispatchQueue(label: "com.openai.CodexAccountSwitcher.claude-bridge.resume")
+            let resumeQueue = DispatchQueue(label: "com.openai.Orbit.claude-bridge.resume")
 
             let resumeOnce: @Sendable (Result<String, Error>) -> Void = { result in
                 resumeQueue.sync {

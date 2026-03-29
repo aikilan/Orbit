@@ -7,7 +7,7 @@ struct BrowserAuthorizationCallback: Sendable {
 }
 
 final class LoopbackCallbackServer: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.openai.CodexAccountSwitcher.loopback")
+    private let queue = DispatchQueue(label: "com.openai.Orbit.loopback")
     private let lock = NSLock()
     private var listener: NWListener?
     private var continuation: CheckedContinuation<BrowserAuthorizationCallback, Error>?
@@ -122,7 +122,7 @@ final class LoopbackCallbackServer: @unchecked Sendable {
                 self.sendResponse(
                     connection: connection,
                     statusCode: 200,
-                    body: "<html><body><h2>Login completed.</h2><p>You can close this tab and return to LLM Account Switcher.</p></body></html>"
+                    body: "<html><body><h2>Login completed.</h2><p>You can close this tab and return to Orbit.</p></body></html>"
                 )
                 self.finish(with: .success(callback))
             case let .failure(error):

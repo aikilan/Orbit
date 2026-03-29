@@ -1,8 +1,8 @@
-# LLM Account Switcher
+# Orbit
 
 [简体中文说明](README.zh-CN.md)
 
-LLM Account Switcher is a native macOS menu bar app for managing local LLM account workspaces on one machine. This release keeps full Codex support, exposes a Claude placeholder entry, keeps local account metadata in one place, and switches the active Codex identity by atomically updating `~/.codex/auth.json`.
+Orbit is a native macOS menu bar app for managing local LLM account workspaces on one machine. This release keeps full Codex support, exposes a Claude placeholder entry, keeps local account metadata in one place, and switches the active Codex identity by atomically updating `~/.codex/auth.json`.
 
 ## Features
 
@@ -19,7 +19,7 @@ LLM Account Switcher is a native macOS menu bar app for managing local LLM accou
 - Refresh online usage data for supported ChatGPT accounts through `/wham/usage`.
 - Recommend switching when the active account is running low on the 5-hour budget.
 - Detect stale live Codex sessions after a switch and suggest restarting Codex when needed.
-- Store app metadata in `~/Library/Application Support/LLMAccountSwitcher/accounts.json` and cached credentials in `~/Library/Application Support/LLMAccountSwitcher/credentials-cache.json` without Keychain prompts.
+- Store app metadata in `~/Library/Application Support/Orbit/accounts.json` and cached credentials in `~/Library/Application Support/Orbit/credentials-cache.json` without Keychain prompts.
 
 ## Requirements
 
@@ -51,8 +51,8 @@ swift test
 
 The packaging script writes these artifacts to `dist/`:
 
-- `LLMAccountSwitcher.app`
-- `LLMAccountSwitcher.zip`
+- `Orbit.app`
+- `Orbit.zip`
 - `assets/AppIcon.icns`
 - `assets/AppIcon-master.png`
 - `assets/MenuBarIcon-template.png`

@@ -3,17 +3,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "CodexAccountSwitcher",
+    name: "Orbit",
     defaultLocalization: "en",
     platforms: [
         .macOS(.v14),
     ],
     products: [
-        .executable(name: "LLMAccountSwitcher", targets: ["CodexAccountSwitcher"]),
+        .executable(name: "Orbit", targets: ["Orbit"]),
     ],
     targets: [
         .executableTarget(
-            name: "CodexAccountSwitcher",
+            name: "Orbit",
             path: "Sources",
             resources: [
                 .process("Resources"),
@@ -25,8 +25,8 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "CodexAccountSwitcherTests",
-            dependencies: ["CodexAccountSwitcher"]
+            name: "OrbitTests",
+            dependencies: ["Orbit"]
         ),
     ]
 )

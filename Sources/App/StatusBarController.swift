@@ -29,7 +29,7 @@ final class WindowRouter {
 
         switch id {
         case "accounts":
-            titles = [L10n.tr("LLM Account Switcher"), L10n.tr("Codex Account Switcher")]
+            titles = [L10n.tr("Orbit")]
         case "add-account":
             titles = [L10n.tr("新增账号"), "新增账号", "Add Account"]
         default:
@@ -95,7 +95,7 @@ final class StatusBarController: NSObject {
         button.image = AppIconArtwork.menuBarIcon
         button.imageScaling = .scaleProportionallyDown
         button.imagePosition = .imageOnly
-        button.toolTip = L10n.tr("LLM Account Switcher")
+        button.toolTip = L10n.tr("Orbit")
         button.target = self
         button.action = #selector(handleStatusItemClick(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -124,7 +124,7 @@ final class StatusBarController: NSObject {
     }
 
     func refreshLocalization() {
-        statusItem.button?.toolTip = L10n.tr("LLM Account Switcher")
+        statusItem.button?.toolTip = L10n.tr("Orbit")
     }
 
     private func updatePopoverHeight(_ height: CGFloat) {

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="LLMAccountSwitcher"
+APP_NAME="Orbit"
 APP_BUNDLE="$ROOT_DIR/dist/${APP_NAME}.app"
 ASSETS_DIR="$ROOT_DIR/dist/assets"
 INFO_PLIST_TEMPLATE="$ROOT_DIR/Packaging/Info.plist"
@@ -34,7 +34,7 @@ cd "$ROOT_DIR"
 swift build -c "$BUILD_CONFIGURATION"
 BIN_DIR="$(swift build -c "$BUILD_CONFIGURATION" --show-bin-path)"
 APP_BINARY="$BIN_DIR/$APP_NAME"
-RESOURCE_BUNDLE="$BIN_DIR/CodexAccountSwitcher_CodexAccountSwitcher.bundle"
+RESOURCE_BUNDLE="$BIN_DIR/Orbit_Orbit.bundle"
 
 "$APP_BINARY" --export-icons "$ICON_EXPORT_DIR"
 

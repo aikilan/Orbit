@@ -10,8 +10,8 @@ struct PlatformPaths: Sendable {
 }
 
 struct AppPaths: Sendable {
-    private static let legacyAppSupportDirectoryName = "CodexAccountSwitcher"
-    private static let appSupportDirectoryName = "LLMAccountSwitcher"
+    private static let legacyAppSupportDirectoryNames = ["LLMAccountSwitcher", "CodexAccountSwitcher"]
+    private static let appSupportDirectoryName = "Orbit"
 
     let codex: PlatformPaths
     let claude: PlatformPaths
@@ -108,10 +108,15 @@ struct AppPaths: Sendable {
             create: true
         )
         let newURL = root.appendingPathComponent(appSupportDirectoryName, isDirectory: true)
-        let legacyURL = root.appendingPathComponent(legacyAppSupportDirectoryName, isDirectory: true)
 
-        if fileManager.fileExists(atPath: legacyURL.path), !fileManager.fileExists(atPath: newURL.path) {
-            try fileManager.moveItem(at: legacyURL, to: newURL)
+        if !fileManager.fileExists(atPath: newURL.path) {
+            for legacyDirectoryName in legacyAppSupportDirectoryNames {
+                let legacyURL = root.appendingPathComponent(legacyDirectoryName, isDirectory: true)
+                if fileManager.fileExists(atPath: legacyURL.path) {
+                    try fileManager.moveItem(at: legacyURL, to: newURL)
+                    break
+                }
+            }
         }
 
         return newURL

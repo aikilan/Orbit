@@ -99,8 +99,8 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
         let body: Data
     }
 
-    private let queue = DispatchQueue(label: "com.openai.CodexAccountSwitcher.openai-compatible-provider-bridge")
-    private let stateQueue = DispatchQueue(label: "com.openai.CodexAccountSwitcher.openai-compatible-provider-bridge.state")
+    private let queue = DispatchQueue(label: "com.openai.Orbit.openai-compatible-provider-bridge")
+    private let stateQueue = DispatchQueue(label: "com.openai.Orbit.openai-compatible-provider-bridge.state")
     private let sendUpstreamRequest: @Sendable (String, String, Data) async throws -> (Int, Data)
 
     private var listener: NWListener?
@@ -137,7 +137,7 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
 
         return try await withCheckedThrowingContinuation { continuation in
             let resumeState = ResumeState()
-            let resumeQueue = DispatchQueue(label: "com.openai.CodexAccountSwitcher.openai-compatible-provider-bridge.resume")
+            let resumeQueue = DispatchQueue(label: "com.openai.Orbit.openai-compatible-provider-bridge.resume")
 
             let resumeOnce: @Sendable (Result<String, Error>) -> Void = { result in
                 resumeQueue.sync {

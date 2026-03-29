@@ -21,7 +21,7 @@ enum AppLanguagePreference: String, CaseIterable, Identifiable {
 
 enum L10n {
     private static let languagePreferenceKey = "app_language_preference"
-    private static let resourceBundleName = "CodexAccountSwitcher_CodexAccountSwitcher.bundle"
+    private static let resourceBundleName = "Orbit_Orbit.bundle"
     private static let englishTranslations = loadTranslations(for: "en")
     private static let simplifiedChineseTranslations = loadTranslations(for: "zh-Hans")
 

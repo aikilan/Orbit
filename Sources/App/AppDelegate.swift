@@ -53,8 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshWindowTitles() {
         for window in NSApp.windows {
             switch window.title {
-            case "Codex Account Switcher", "LLM Account Switcher":
-                window.title = L10n.tr("LLM Account Switcher")
+            case "Orbit":
+                window.title = L10n.tr("Orbit")
             case "新增账号", "Add Account":
                 window.title = L10n.tr("新增账号")
             default:
