@@ -757,18 +757,12 @@ private struct AccountDetailView: View {
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(Color.accentColor)
                     .disabled(isCLIActionDisabled)
-
-                    if shouldShowIsolatedInstanceAction {
-                        Button(isolatedInstanceButtonTitle) {
-                            Task { await model.launchIsolatedCodex(for: account) }
-                        }
-                        .buttonStyle(.plain)
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .disabled(isIsolatedInstanceActionDisabled)
-                    }
                 }
             }
+
+            Divider()
+
+            secondaryLaunchActionsSection
 
             Divider()
 
@@ -784,13 +778,6 @@ private struct AccountDetailView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(model.isRefreshingStatus(for: account.id) || model.isRefreshingAllStatuses || model.isSwitchInProgress)
-
-                    Button(switchButtonTitle) {
-                        onSwitch()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(account.isActive || model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
                 }
 
                 HStack(spacing: 10) {
@@ -816,6 +803,36 @@ private struct AccountDetailView: View {
         }
         .padding(24)
         .orbitSurface(.accent, radius: OrbitRadius.hero)
+    }
+
+    private var secondaryLaunchActionsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.tr("附加操作"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Text(L10n.tr("切换当前账号或启动独立实例。"))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                Button(switchButtonTitle) {
+                    onSwitch()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(account.isActive || model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
+
+                if shouldShowIsolatedInstanceAction {
+                    Button(isolatedInstanceButtonTitle) {
+                        Task { await model.launchIsolatedCodex(for: account) }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isIsolatedInstanceActionDisabled)
+                }
+            }
+        }
     }
 
     private var inspectorPanel: some View {
@@ -964,11 +981,6 @@ private struct AccountDetailView: View {
 
     private var shouldShowIsolatedInstanceAction: Bool {
         account.providerRule == .chatgptOAuth
-            && (
-                model.canLaunchIsolatedCodex(for: account)
-                    || model.isLaunchingIsolatedInstance(for: account.id)
-                    || model.hasLaunchedIsolatedInstance(for: account.id)
-            )
     }
 
     private var isIsolatedInstanceActionDisabled: Bool {
