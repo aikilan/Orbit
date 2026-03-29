@@ -1157,7 +1157,8 @@ final class AppViewModelTests: XCTestCase {
                 model: "gpt-5.4",
                 modelProvider: "openai",
                 baseURL: "http://127.0.0.1:18080",
-                apiKeyEnvName: "ANTHROPIC_API_KEY"
+                apiKeyEnvName: "ANTHROPIC_API_KEY",
+                availableModels: ["gpt-5.4"]
             )
         )
         XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_BASE_URL"], "http://127.0.0.1:18080")
@@ -1222,7 +1223,9 @@ final class AppViewModelTests: XCTestCase {
             )
         )
         XCTAssertEqual(bridgeSnapshot.lastModel, "deepseek-chat")
+        XCTAssertEqual(bridgeSnapshot.lastAvailableModels, ["deepseek-chat"])
         XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
+        XCTAssertEqual(claudeCLILauncher.lastContext?.providerSnapshot?.availableModels, ["deepseek-chat"])
     }
 
     func testMoonshotProviderAccountOpensClaudeCodeThroughBridge() async throws {
@@ -1283,8 +1286,10 @@ final class AppViewModelTests: XCTestCase {
             )
         )
         XCTAssertEqual(bridgeSnapshot.lastModel, "kimi-k2-0711-preview")
+        XCTAssertEqual(bridgeSnapshot.lastAvailableModels, ["kimi-k2-0711-preview"])
         XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
         XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
+        XCTAssertEqual(claudeCLILauncher.lastContext?.providerSnapshot?.availableModels, ["kimi-k2-0711-preview"])
     }
 
     func testMiniMaxOpenAICompatibleProviderAccountOpensClaudeCodeThroughBridge() async throws {
@@ -1346,8 +1351,73 @@ final class AppViewModelTests: XCTestCase {
             )
         )
         XCTAssertEqual(bridgeSnapshot.lastModel, "MiniMax-M2.7")
+        XCTAssertEqual(bridgeSnapshot.lastAvailableModels, ["MiniMax-M2.7"])
         XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
         XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
+        XCTAssertEqual(claudeCLILauncher.lastContext?.providerSnapshot?.availableModels, ["MiniMax-M2.7"])
+    }
+
+    func testZAIProviderAccountOpensClaudeCodeThroughBridge() async throws {
+        let accountID = UUID()
+        let providerAccountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let claudeCLILauncher = RecordingClaudeCLILauncher()
+        let patchedRuntimeManager = RecordingClaudePatchedRuntimeManager()
+        let bridgeManager = RecordingCodexOAuthClaudeBridgeManager()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: providerAccountID,
+                        platform: .codex,
+                        identifier: "acct_zai_provider",
+                        displayName: "Z.AI",
+                        email: "sk-...zai",
+                        rule: .openAICompatible,
+                        presetID: "zai",
+                        baseURL: "https://api.z.ai/api/coding/paas/v4",
+                        envName: "ZAI_API_KEY",
+                        model: "glm-5"
+                    ),
+                    payload: try makeProviderCredential("sk-zai-test"),
+                    snapshot: nil
+                )
+            ],
+            claudeCLILauncher: claudeCLILauncher,
+            claudePatchedRuntimeManager: patchedRuntimeManager,
+            codexOAuthClaudeBridgeManager: bridgeManager
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.database.account(id: providerAccountID))
+
+        await harness.model.openCLI(
+            for: account,
+            target: .claude,
+            workingDirectoryURL: makeWorkingDirectoryURL("zai-claude")
+        )
+
+        let bridgeSnapshot = await bridgeManager.snapshot()
+        XCTAssertEqual(bridgeSnapshot.prepareCallCount, 1)
+        XCTAssertEqual(
+            bridgeSnapshot.lastSource,
+            .provider(
+                baseURL: "https://api.z.ai/api/coding/paas/v4",
+                apiKeyEnvName: "ZAI_API_KEY",
+                apiKey: "sk-zai-test",
+                supportsResponsesAPI: false
+            )
+        )
+        XCTAssertEqual(bridgeSnapshot.lastModel, "glm-5")
+        XCTAssertEqual(bridgeSnapshot.lastAvailableModels, ["glm-5"])
+        XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
+        XCTAssertEqual(claudeCLILauncher.lastContext?.providerSnapshot?.availableModels, ["glm-5"])
     }
 
     func testMiniMaxClaudeCompatibleProviderAccountOpensClaudeCodeWithAnthropicAuthToken() async throws {
@@ -1404,7 +1474,8 @@ final class AppViewModelTests: XCTestCase {
                 model: "MiniMax-M2.7",
                 modelProvider: nil,
                 baseURL: "https://api.minimax.io/anthropic",
-                apiKeyEnvName: "MINIMAX_API_KEY"
+                apiKeyEnvName: "MINIMAX_API_KEY",
+                availableModels: nil
             )
         )
         XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_BASE_URL"], "https://api.minimax.io/anthropic")
@@ -1463,7 +1534,8 @@ final class AppViewModelTests: XCTestCase {
                 model: "claude-sonnet-4.5",
                 modelProvider: nil,
                 baseURL: "https://api.anthropic.com/v1",
-                apiKeyEnvName: "ANTHROPIC_API_KEY"
+                apiKeyEnvName: "ANTHROPIC_API_KEY",
+                availableModels: nil
             )
         )
         XCTAssertEqual(claudeCLILauncher.lastContext?.environmentVariables["ANTHROPIC_BASE_URL"], "https://api.anthropic.com/v1")
@@ -1657,12 +1729,17 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(bridgeSnapshot.lastAPIKeyEnvName, "DEEPSEEK_API_KEY")
         XCTAssertEqual(bridgeSnapshot.lastAPIKey, "sk-deepseek-test")
         XCTAssertEqual(bridgeSnapshot.lastModel, "deepseek-reasoner")
+        XCTAssertEqual(bridgeSnapshot.lastAvailableModels, ["deepseek-reasoner"])
         XCTAssertEqual(codexCLILauncher.launchCallCount, 1)
         XCTAssertEqual(
             codexCLILauncher.lastContext?.environmentVariables["OPENAI_API_KEY"],
             "openai-compatible-provider-bridge"
         )
         XCTAssertTrue(codexCLILauncher.lastContext?.configFileContents?.contains("base_url = \"http://127.0.0.1:18082\"") == true)
+        XCTAssertEqual(
+            codexCLILauncher.lastContext?.modelCatalogSnapshot,
+            ResolvedCodexModelCatalogSnapshot(availableModels: ["deepseek-reasoner"])
+        )
     }
 
     func testMoonshotProviderAccountOpensCodexCLIThroughChatCompletionsBridge() async throws {
@@ -1711,12 +1788,17 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(bridgeSnapshot.lastAPIKeyEnvName, "MOONSHOT_API_KEY")
         XCTAssertEqual(bridgeSnapshot.lastAPIKey, "sk-moonshot-test")
         XCTAssertEqual(bridgeSnapshot.lastModel, "kimi-k2-0711-preview")
+        XCTAssertEqual(bridgeSnapshot.lastAvailableModels, ["kimi-k2-0711-preview"])
         XCTAssertEqual(codexCLILauncher.launchCallCount, 1)
         XCTAssertEqual(
             codexCLILauncher.lastContext?.environmentVariables["OPENAI_API_KEY"],
             "openai-compatible-provider-bridge"
         )
         XCTAssertTrue(codexCLILauncher.lastContext?.configFileContents?.contains("base_url = \"http://127.0.0.1:18082\"") == true)
+        XCTAssertEqual(
+            codexCLILauncher.lastContext?.modelCatalogSnapshot,
+            ResolvedCodexModelCatalogSnapshot(availableModels: ["kimi-k2-0711-preview"])
+        )
     }
 
     func testMiniMaxOpenAICompatibleProviderAccountOpensCodexCLIThroughChatCompletionsBridge() async throws {
@@ -1766,12 +1848,17 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(bridgeSnapshot.lastAPIKeyEnvName, "MINIMAX_API_KEY")
         XCTAssertEqual(bridgeSnapshot.lastAPIKey, "sk-minimax-openai")
         XCTAssertEqual(bridgeSnapshot.lastModel, "MiniMax-M2.7")
+        XCTAssertEqual(bridgeSnapshot.lastAvailableModels, ["MiniMax-M2.7"])
         XCTAssertEqual(codexCLILauncher.launchCallCount, 1)
         XCTAssertEqual(
             codexCLILauncher.lastContext?.environmentVariables["OPENAI_API_KEY"],
             "openai-compatible-provider-bridge"
         )
         XCTAssertTrue(codexCLILauncher.lastContext?.configFileContents?.contains("base_url = \"http://127.0.0.1:18082\"") == true)
+        XCTAssertEqual(
+            codexCLILauncher.lastContext?.modelCatalogSnapshot,
+            ResolvedCodexModelCatalogSnapshot(availableModels: ["MiniMax-M2.7"])
+        )
     }
 
     func testMiniMaxClaudeCompatibleProviderAccountOpensCodexCLIThroughBridge() async throws {
@@ -1821,12 +1908,71 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(bridgeSnapshot.lastAPIKeyEnvName, "MINIMAX_API_KEY")
         XCTAssertEqual(bridgeSnapshot.lastAPIKey, "sk-minimax-claude")
         XCTAssertEqual(bridgeSnapshot.lastModel, "MiniMax-M2.7")
+        XCTAssertEqual(bridgeSnapshot.lastAvailableModels, ["MiniMax-M2.7"])
         XCTAssertEqual(codexCLILauncher.launchCallCount, 1)
         XCTAssertEqual(
             codexCLILauncher.lastContext?.environmentVariables["OPENAI_API_KEY"],
             "claude-provider-bridge"
         )
         XCTAssertTrue(codexCLILauncher.lastContext?.configFileContents?.contains("base_url = \"http://127.0.0.1:18081\"") == true)
+        XCTAssertEqual(
+            codexCLILauncher.lastContext?.modelCatalogSnapshot,
+            ResolvedCodexModelCatalogSnapshot(availableModels: ["MiniMax-M2.7"])
+        )
+    }
+
+    func testZAIProviderAccountOpensCodexCLIThroughChatCompletionsBridge() async throws {
+        let accountID = UUID()
+        let providerAccountID = UUID()
+        let codexCLILauncher = RecordingCodexCLILauncher()
+        let bridgeManager = RecordingOpenAICompatibleProviderCodexBridgeManager()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: makePayload(accountID: "acct_cached", refreshToken: "refresh_old"),
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            extraSeeds: [
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: providerAccountID,
+                        platform: .codex,
+                        identifier: "acct_zai_provider",
+                        displayName: "Z.AI",
+                        email: "sk-...zai",
+                        rule: .openAICompatible,
+                        presetID: "zai",
+                        baseURL: "https://api.z.ai/api/coding/paas/v4",
+                        envName: "ZAI_API_KEY",
+                        model: "glm-5"
+                    ),
+                    payload: try makeProviderCredential("sk-zai-test"),
+                    snapshot: nil
+                )
+            ],
+            cliLauncher: codexCLILauncher,
+            openAICompatibleProviderCodexBridgeManager: bridgeManager
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.database.account(id: providerAccountID))
+
+        await harness.model.openCodexCLI(for: account, workingDirectoryURL: makeWorkingDirectoryURL("zai-codex"))
+
+        let bridgeSnapshot = await bridgeManager.snapshot()
+        XCTAssertEqual(bridgeSnapshot.prepareCallCount, 1)
+        XCTAssertEqual(bridgeSnapshot.lastAccountID, providerAccountID)
+        XCTAssertEqual(bridgeSnapshot.lastBaseURL, "https://api.z.ai/api/coding/paas/v4")
+        XCTAssertEqual(bridgeSnapshot.lastAPIKeyEnvName, "ZAI_API_KEY")
+        XCTAssertEqual(bridgeSnapshot.lastAPIKey, "sk-zai-test")
+        XCTAssertEqual(bridgeSnapshot.lastModel, "glm-5")
+        XCTAssertEqual(bridgeSnapshot.lastAvailableModels, ["glm-5"])
+        XCTAssertEqual(codexCLILauncher.launchCallCount, 1)
+        XCTAssertEqual(
+            codexCLILauncher.lastContext?.modelCatalogSnapshot,
+            ResolvedCodexModelCatalogSnapshot(availableModels: ["glm-5"])
+        )
     }
 
     func testRefreshAllAccountStatusesRefreshesUnifiedQueue() async throws {
@@ -2262,6 +2408,7 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(cliLauncher.launchCallCount, 1)
         XCTAssertEqual(cliLauncher.lastContext?.mode, .isolated)
         XCTAssertNil(cliLauncher.lastContext?.authPayload)
+        XCTAssertNil(cliLauncher.lastContext?.modelCatalogSnapshot)
         XCTAssertTrue(cliLauncher.lastContext?.configFileContents?.contains("base_url = \"https://api.openai.com/v1\"") == true)
         XCTAssertEqual(cliLauncher.lastContext?.environmentVariables["OPENAI_API_KEY"], "sk-test-old")
         XCTAssertEqual(cliLauncher.lastContext?.workingDirectoryURL, workingDirectoryURL)

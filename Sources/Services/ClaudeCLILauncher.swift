@@ -41,10 +41,59 @@ struct ClaudeCLILauncher {
         }
         if let configDirectoryURL = context.configDirectoryURL {
             try fileManager.createDirectory(at: configDirectoryURL, withIntermediateDirectories: true)
+            try writeManagedSettingsIfNeeded(
+                providerSnapshot: context.providerSnapshot,
+                configDirectoryURL: configDirectoryURL
+            )
             environmentVariables["CLAUDE_CONFIG_DIR"] = configDirectoryURL.path
         }
 
         return prefix + envCommand(environmentVariables: environmentVariables, executable: executableCommand)
+    }
+
+    private func writeManagedSettingsIfNeeded(
+        providerSnapshot: ResolvedClaudeProviderSnapshot?,
+        configDirectoryURL: URL
+    ) throws {
+        guard let providerSnapshot else { return }
+
+        let settingsURL = configDirectoryURL.appendingPathComponent("settings.json", isDirectory: false)
+        var settingsObject = [String: Any]()
+
+        if fileManager.fileExists(atPath: settingsURL.path) {
+            let data = try Data(contentsOf: settingsURL)
+            if let existing = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                settingsObject = existing
+            }
+        }
+
+        settingsObject["model"] = providerSnapshot.model
+        if let availableModels = providerSnapshot.availableModels {
+            settingsObject["availableModels"] = normalizedAvailableModels(availableModels, fallbackModel: providerSnapshot.model)
+        } else {
+            settingsObject.removeValue(forKey: "availableModels")
+        }
+
+        let data = try JSONSerialization.data(withJSONObject: settingsObject, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: settingsURL, options: .atomic)
+    }
+
+    private func normalizedAvailableModels(_ models: [String], fallbackModel: String) -> [String] {
+        var normalized = [String]()
+        var seen = Set<String>()
+
+        for model in models {
+            let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, seen.insert(trimmed).inserted else { continue }
+            normalized.append(trimmed)
+        }
+
+        let trimmedFallback = fallbackModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedFallback.isEmpty, seen.insert(trimmedFallback).inserted {
+            normalized.append(trimmedFallback)
+        }
+
+        return normalized
     }
 
     private func resolvedExecutable() -> String {

@@ -419,9 +419,14 @@ struct ResolvedCodexCLILaunchContext: Equatable, Sendable {
     let mode: Mode
     let codexHomeURL: URL?
     let authPayload: CodexAuthPayload?
+    let modelCatalogSnapshot: ResolvedCodexModelCatalogSnapshot?
     let configFileContents: String?
     let environmentVariables: [String: String]
     let arguments: [String]
+}
+
+struct ResolvedCodexModelCatalogSnapshot: Equatable, Sendable {
+    let availableModels: [String]
 }
 
 struct ResolvedClaudeProviderSnapshot: Equatable, Sendable {
@@ -430,6 +435,7 @@ struct ResolvedClaudeProviderSnapshot: Equatable, Sendable {
     let modelProvider: String?
     let baseURL: String
     let apiKeyEnvName: String
+    let availableModels: [String]?
 }
 
 struct ResolvedClaudeCLILaunchContext: Equatable, Sendable {

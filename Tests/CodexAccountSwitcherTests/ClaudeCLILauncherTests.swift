@@ -32,7 +32,8 @@ final class ClaudeCLILauncherTests: XCTestCase {
                     model: "claude-sonnet-4.5",
                     modelProvider: "openrouter",
                     baseURL: "https://proxy.example/v1",
-                    apiKeyEnvName: "ANTHROPIC_API_KEY"
+                    apiKeyEnvName: "ANTHROPIC_API_KEY",
+                    availableModels: ["deepseek-chat", "deepseek-reasoner"]
                 ),
                 environmentVariables: [
                     "ANTHROPIC_API_KEY": "sk-ant-test",
@@ -51,6 +52,13 @@ final class ClaudeCLILauncherTests: XCTestCase {
                 "end tell",
             ]
         )
+
+        let settingsURL = rootURL.appendingPathComponent(".claude/settings.json", isDirectory: false)
+        let data = try Data(contentsOf: settingsURL)
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(object["model"] as? String, "claude-sonnet-4.5")
+        XCTAssertEqual(object["availableModels"] as? [String], ["deepseek-chat", "deepseek-reasoner", "claude-sonnet-4.5"])
     }
 }
 

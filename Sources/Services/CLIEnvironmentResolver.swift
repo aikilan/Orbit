@@ -34,6 +34,7 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
         let baseURL: String
         let apiKeyEnvName: String
         let apiKey: String
+        let availableModels: [String]?
     }
 
     private let fileManager: FileManager
@@ -65,6 +66,7 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                     mode: .globalCurrentAuth,
                     codexHomeURL: nil,
                     authPayload: nil,
+                    modelCatalogSnapshot: nil,
                     configFileContents: nil,
                     environmentVariables: [:],
                     arguments: []
@@ -82,6 +84,7 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 mode: .isolated,
                 codexHomeURL: codexHomeURL,
                 authPayload: authPayload,
+                modelCatalogSnapshot: nil,
                 configFileContents: nil,
                 environmentVariables: [:],
                 arguments: []
@@ -91,6 +94,17 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 throw CLIEnvironmentResolverError.missingProviderCredential
             }
             let provider = try resolvedProviderConfig(for: account)
+            let shouldManageModelCatalog = shouldManageCodexModelCatalog(
+                for: account,
+                providerIdentifier: provider.identifier
+            )
+            let availableModels = shouldManageModelCatalog || !account.supportsResponsesAPI
+                ? await availableModelsForBridge(
+                    account: account,
+                    providerBaseURL: provider.baseURL,
+                    apiKey: credential.apiKey
+                )
+                : []
             let resolvedProvider: (baseURL: String, apiKeyEnvName: String, apiKey: String)
             if account.supportsResponsesAPI {
                 resolvedProvider = (
@@ -99,11 +113,6 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                     apiKey: credential.apiKey
                 )
             } else {
-                let availableModels = await availableModelsForBridge(
-                    account: account,
-                    providerBaseURL: provider.baseURL,
-                    apiKey: credential.apiKey
-                )
                 let bridge = try await openAICompatibleProviderCodexBridgeManager.prepareBridge(
                     accountID: account.id,
                     baseURL: provider.baseURL,
@@ -129,6 +138,9 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 mode: .isolated,
                 codexHomeURL: codexHomeURL,
                 authPayload: nil,
+                modelCatalogSnapshot: shouldManageModelCatalog
+                    ? ResolvedCodexModelCatalogSnapshot(availableModels: availableModels)
+                    : nil,
                 configFileContents: codexConfigContents(
                     model: account.resolvedDefaultModel,
                     modelProvider: provider.identifier,
@@ -172,6 +184,7 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 mode: .isolated,
                 codexHomeURL: codexHomeURL,
                 authPayload: nil,
+                modelCatalogSnapshot: ResolvedCodexModelCatalogSnapshot(availableModels: availableModels),
                 configFileContents: codexConfigContents(
                     model: account.resolvedDefaultModel,
                     modelProvider: provider.identifier,
@@ -232,7 +245,8 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 modelProvider: nil,
                 baseURL: runtimeBaseURL,
                 apiKeyEnvName: provider.apiKeyEnvName,
-                apiKey: providerCredential.apiKey
+                apiKey: providerCredential.apiKey,
+                availableModels: nil
             )
             return ResolvedClaudeCLILaunchContext(
                 accountID: account.id,
@@ -248,7 +262,8 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                     model: resolvedProvider.model,
                     modelProvider: resolvedProvider.modelProvider,
                     baseURL: resolvedProvider.baseURL,
-                    apiKeyEnvName: resolvedProvider.apiKeyEnvName
+                    apiKeyEnvName: resolvedProvider.apiKeyEnvName,
+                    availableModels: resolvedProvider.availableModels
                 ),
                 environmentVariables: claudeProviderEnvironmentVariables(for: resolvedProvider),
                 arguments: ["--model", resolvedProvider.model]
@@ -275,7 +290,8 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                     modelProvider: nil,
                     baseURL: bridge.baseURL,
                     apiKeyEnvName: bridge.apiKeyEnvName,
-                    apiKey: bridge.apiKey
+                    apiKey: bridge.apiKey,
+                    availableModels: [model]
                 )
             )
         case .openAICompatible:
@@ -310,7 +326,8 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                     modelProvider: provider.identifier,
                     baseURL: bridge.baseURL,
                     apiKeyEnvName: bridge.apiKeyEnvName,
-                    apiKey: bridge.apiKey
+                    apiKey: bridge.apiKey,
+                    availableModels: availableModels
                 )
             )
         }
@@ -342,7 +359,8 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 model: provider.model,
                 modelProvider: provider.modelProvider,
                 baseURL: provider.baseURL,
-                apiKeyEnvName: provider.apiKeyEnvName
+                apiKeyEnvName: provider.apiKeyEnvName,
+                availableModels: provider.availableModels
             ),
             environmentVariables: claudeProviderEnvironmentVariables(for: provider),
             arguments: ["--model", provider.model]
@@ -423,6 +441,20 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
         }
 
         return !preset.isCustom
+    }
+
+    private func shouldManageCodexModelCatalog(
+        for account: ManagedAccount,
+        providerIdentifier: String
+    ) -> Bool {
+        switch account.providerRule {
+        case .chatgptOAuth, .claudeProfile:
+            return false
+        case .claudeCompatible:
+            return true
+        case .openAICompatible:
+            return providerIdentifier != "openai"
+        }
     }
 
     private func fetchModelIDs(
