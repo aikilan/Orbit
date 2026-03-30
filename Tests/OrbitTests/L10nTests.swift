@@ -2,6 +2,34 @@ import XCTest
 @testable import Orbit
 
 final class L10nTests: XCTestCase {
+    func testEnglishTranslationExistsForClaudePatchedRuntimeHelpText() {
+        let originalPreference = L10n.currentLanguagePreference
+        defer {
+            L10n.setLanguagePreference(originalPreference)
+        }
+
+        L10n.setLanguagePreference(.english)
+
+        XCTAssertEqual(
+            L10n.tr("打开 CLI 会启动应用生成的 Claude Code patched runtime，并自动桥接当前账号的 OpenAI 兼容凭据。"),
+            "Launching the CLI uses the app-managed patched Claude Code runtime and automatically bridges the current account's OpenAI-compatible credentials."
+        )
+    }
+
+    func testEnglishTranslationExistsForProviderCredentialStatusMessage() {
+        let originalPreference = L10n.currentLanguagePreference
+        defer {
+            L10n.setLanguagePreference(originalPreference)
+        }
+
+        L10n.setLanguagePreference(.english)
+
+        XCTAssertEqual(
+            L10n.tr("Provider API Key 本地凭据可用。"),
+            "Provider API Key local credential is available."
+        )
+    }
+
     func testSystemLanguagePreferenceUsesFirstSupportedLanguage() {
         XCTAssertEqual(
             L10n.resolvedSystemLanguagePreference(preferredLanguages: ["en-US", "zh-Hans"]),

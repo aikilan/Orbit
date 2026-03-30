@@ -1195,6 +1195,145 @@ private struct AccountDetailView: View {
         }
     }
 
+    private var localizedLastStatusMessage: String {
+        guard let message = account.lastStatusMessage?.trimmingCharacters(in: .whitespacesAndNewlines), !message.isEmpty else {
+            return L10n.tr("尚未手动更新")
+        }
+
+        if let quotaSummary = snapshot?.remainingSummary {
+            if matchesLocalizedStatusTemplate(
+                message,
+                chineseTemplate: "状态与额度已更新：剩余 %@，当前已触达额度限制。",
+                englishTemplate: "Status and quota updated: %@ remaining, and the current quota limit has been reached."
+            ) {
+                return L10n.tr("状态与额度已更新：剩余 %@，当前已触达额度限制。", quotaSummary)
+            }
+
+            if matchesLocalizedStatusTemplate(
+                message,
+                chineseTemplate: "状态与额度已更新：剩余 %@。",
+                englishTemplate: "Status and quota updated: %@ remaining."
+            ) {
+                return L10n.tr("状态与额度已更新：剩余 %@。", quotaSummary)
+            }
+        }
+
+        if let claudeSnapshot,
+           matchesLocalizedStatusTemplate(
+                message,
+                chineseTemplate: "Anthropic API Key 已刷新：请求剩余 %@。",
+                englishTemplate: "Anthropic API Key refreshed: %@ requests remaining."
+           ) {
+            return L10n.tr(
+                "Anthropic API Key 已刷新：请求剩余 %@。",
+                claudeRemainingStatusText(claudeSnapshot.requests.remaining)
+            )
+        }
+
+        for (chinese, english, key) in [
+            (
+                "Provider API Key 本地凭据可用。",
+                "Provider API Key local credential is available.",
+                "Provider API Key 本地凭据可用。"
+            ),
+            (
+                "API Key 模式不支持在线额度同步，已同步当前 ~/.codex/auth.json。",
+                "API Key mode does not support online quota sync. The current ~/.codex/auth.json has been synced.",
+                "API Key 模式不支持在线额度同步，已同步当前 ~/.codex/auth.json。"
+            ),
+            (
+                "API Key 模式不支持在线额度同步，本地凭据可用。",
+                "API Key mode does not support online quota sync, but the local credential is available.",
+                "API Key 模式不支持在线额度同步，本地凭据可用。"
+            ),
+            (
+                "状态已更新，并同步了当前 ~/.codex/auth.json。",
+                "Status updated, and the current ~/.codex/auth.json has been synced.",
+                "状态已更新，并同步了当前 ~/.codex/auth.json。"
+            ),
+            (
+                "状态已更新，账号凭据可用。",
+                "Status updated and the account credential is available.",
+                "状态已更新，账号凭据可用。"
+            ),
+            (
+                "这是本地 Claude Profile；应用不会在线刷新 claude.ai 登录态，可直接从应用启动 Claude CLI 验证。",
+                "This is a local Claude Profile. The app does not refresh claude.ai sign-in state online; you can verify it by launching Claude CLI from the app.",
+                "这是本地 Claude Profile；应用不会在线刷新 claude.ai 登录态，可直接从应用启动 Claude CLI 验证。"
+            ),
+        ] {
+            if message == chinese || message == english {
+                return L10n.tr(key)
+            }
+        }
+
+        if let error = extractStatusTemplateArgument(
+            from: message,
+            chineseTemplate: "状态已更新，但额度同步失败：%@",
+            englishTemplate: "Status updated, but quota sync failed: %@"
+        ) {
+            return L10n.tr("状态已更新，但额度同步失败：%@", error)
+        }
+
+        if let error = extractStatusTemplateArgument(
+            from: message,
+            chineseTemplate: "状态更新失败：%@",
+            englishTemplate: "Status update failed: %@"
+        ) {
+            return L10n.tr("状态更新失败：%@", error)
+        }
+
+        return message
+    }
+
+    private func claudeRemainingStatusText(_ value: Int?) -> String {
+        guard let value else { return L10n.tr("未知") }
+        return "\(value)"
+    }
+
+    private func matchesLocalizedStatusTemplate(
+        _ message: String,
+        chineseTemplate: String,
+        englishTemplate: String
+    ) -> Bool {
+        extractStatusTemplateArgument(
+            from: message,
+            chineseTemplate: chineseTemplate,
+            englishTemplate: englishTemplate
+        ) != nil
+    }
+
+    private func extractStatusTemplateArgument(
+        from message: String,
+        chineseTemplate: String,
+        englishTemplate: String
+    ) -> String? {
+        for template in [chineseTemplate, englishTemplate] {
+            guard let placeholderRange = template.range(of: "%@") else {
+                if message == template {
+                    return ""
+                }
+                continue
+            }
+
+            let prefix = String(template[..<placeholderRange.lowerBound])
+            let suffix = String(template[placeholderRange.upperBound...])
+            guard message.hasPrefix(prefix), message.hasSuffix(suffix) else {
+                continue
+            }
+
+            let start = message.index(message.startIndex, offsetBy: prefix.count)
+            let end = message.index(message.endIndex, offsetBy: -suffix.count)
+            guard start <= end else {
+                continue
+            }
+
+            return String(message[start..<end])
+        }
+
+        return nil
+    }
+
     private var statusSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L10n.tr("账号状态"))
@@ -1202,7 +1341,7 @@ private struct AccountDetailView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 inspectorRow(L10n.tr("上次检查"), account.lastStatusCheckAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("尚未手动更新"))
-                inspectorRow(L10n.tr("最近结果"), account.lastStatusMessage ?? L10n.tr("尚未手动更新"))
+                inspectorRow(L10n.tr("最近结果"), localizedLastStatusMessage)
                 inspectorRow(L10n.tr("说明"), statusDescriptionText)
             }
             .padding(12)

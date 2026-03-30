@@ -64,7 +64,6 @@ enum L10n {
 
         return englishTranslations
     }
-
     static func tr(_ key: String, _ arguments: CVarArg...) -> String {
         let format = resolvedTranslations[key] ?? key
         guard !arguments.isEmpty else { return format }
