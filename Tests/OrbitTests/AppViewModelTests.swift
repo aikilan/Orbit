@@ -4,6 +4,22 @@ import XCTest
 
 @MainActor
 final class AppViewModelTests: XCTestCase {
+    nonisolated(unsafe) private var originalLanguagePreference: AppLanguagePreference?
+
+    override func setUp() {
+        super.setUp()
+        originalLanguagePreference = L10n.currentLanguagePreference
+        L10n.setLanguagePreference(.simplifiedChinese)
+    }
+
+    override func tearDown() {
+        if let originalLanguagePreference {
+            L10n.setLanguagePreference(originalLanguagePreference)
+        }
+        originalLanguagePreference = nil
+        super.tearDown()
+    }
+
     func testSwitchToAccountUsesRefreshedPayloadWhenRefreshSucceeds() async throws {
         let accountID = UUID()
         let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
