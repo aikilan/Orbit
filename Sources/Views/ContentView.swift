@@ -33,12 +33,17 @@ struct ContentView: View {
         .background(OrbitPalette.background)
         .tint(OrbitPalette.accent)
         .task {
+            model.sessionLogger?.info("content_task.begin")
             WindowRouter.shared.register { id in
                 openWindow(id: id)
             }
             (NSApp.delegate as? AppDelegate)?.installStatusBarControllerIfNeeded(with: model)
+            model.sessionLogger?.info("prepare.begin")
             await model.prepare()
+            model.sessionLogger?.info("prepare.end")
+            model.sessionLogger?.info("reconcile.begin")
             await model.reconcileCurrentAuthState()
+            model.sessionLogger?.info("reconcile.end")
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task {
@@ -109,10 +114,6 @@ struct ContentView: View {
 
                 Text(L10n.tr("本地 LLM 账号工作台"))
                     .font(.callout)
-                    .foregroundStyle(.secondary)
-
-                Text(L10n.tr("账号"))
-                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
         }
@@ -735,33 +736,34 @@ private struct AccountDetailView: View {
 
     private var quickActionSection: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .center, spacing: 16) {
                     Text(L10n.tr("打开 CLI"))
                         .font(.title2.bold())
 
-                    Text(cliLaunchHelpText)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                    Spacer(minLength: 12)
 
-                Spacer(minLength: 12)
-
-                Picker(
-                    L10n.tr("默认启动目标"),
-                    selection: Binding(
-                        get: { model.defaultCLITarget(for: account) },
-                        set: { model.setDefaultCLITarget($0, for: account.id) }
-                    )
-                ) {
-                    ForEach(account.allowedCLITargets) { target in
-                        Text(target.displayName)
-                            .tag(target)
+                    Picker(
+                        L10n.tr("默认启动目标"),
+                        selection: Binding(
+                            get: { model.defaultCLITarget(for: account) },
+                            set: { model.setDefaultCLITarget($0, for: account.id) }
+                        )
+                    ) {
+                        ForEach(account.allowedCLITargets) { target in
+                            Text(target.displayName)
+                                .tag(target)
+                        }
                     }
+                    .labelsHidden()
+                    .frame(width: 220)
                 }
-                .labelsHidden()
-                .frame(width: 220)
+
+                Text(cliLaunchHelpText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Rectangle()

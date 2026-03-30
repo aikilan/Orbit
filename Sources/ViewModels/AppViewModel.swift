@@ -124,6 +124,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var launchingCLIAccountID: UUID?
 
     let paths: AppPaths
+    let sessionLogger: AppSessionLogger?
 
     private let databaseStore: AppDatabaseStore
     private let credentialStore: any AccountCredentialStore
@@ -157,6 +158,7 @@ final class AppViewModel: ObservableObject {
 
     init(
         paths: AppPaths,
+        sessionLogger: AppSessionLogger? = nil,
         databaseStore: AppDatabaseStore,
         credentialStore: any AccountCredentialStore,
         authFileManager: any AuthFileManaging,
@@ -180,6 +182,7 @@ final class AppViewModel: ObservableObject {
         bannerAutoDismissDuration: Duration = .seconds(10)
     ) {
         self.paths = paths
+        self.sessionLogger = sessionLogger
         self.databaseStore = databaseStore
         self.credentialStore = credentialStore
         self.authFileManager = authFileManager
@@ -203,27 +206,47 @@ final class AppViewModel: ObservableObject {
         self.bannerAutoDismissDuration = bannerAutoDismissDuration
     }
 
-    static func live() -> AppViewModel {
+    static func live(sessionLogger: AppSessionLogger? = nil) -> AppViewModel {
         do {
             let paths = try AppPaths()
+            sessionLogger?.info(
+                "paths.resolve",
+                metadata: [
+                    "app_support_path": paths.appSupportDirectoryURL.path,
+                    "claude_home_path": paths.claude.homeURL.path,
+                    "codex_home_path": paths.codex.homeURL.path,
+                ]
+            )
             let dbStore = AppDatabaseStore(databaseURL: paths.databaseURL)
+            sessionLogger?.info("database_store.init", metadata: ["database_path": paths.databaseURL.path])
             let credentialStore = CachedCredentialStore(
                 persistentStore: PlaintextCredentialCacheStore(cacheFileURL: paths.credentialCacheURL)
             )
+            sessionLogger?.info("credential_store.init", metadata: ["cache_path": paths.credentialCacheURL.path])
             let authFileManager = AuthFileManager(authFileURL: paths.authFileURL)
+            sessionLogger?.info("auth_manager.init", metadata: ["auth_file_path": paths.authFileURL.path])
             let jwtDecoder = JWTClaimsDecoder()
             let oauthClient = OAuthClient()
             let claudeProfileManager = ClaudeProfileSnapshotManager(paths: paths)
             let claudeAPIClient = ClaudeAPIClient()
             let logReader = SQLiteLogReader(databaseURL: paths.stateDatabaseURL)
+            sessionLogger?.info(
+                "quota_monitor.init",
+                metadata: [
+                    "sessions_path": paths.sessionsDirectoryURL.path,
+                    "state_database_path": paths.stateDatabaseURL.path,
+                ]
+            )
             let quotaMonitor = QuotaMonitor(
                 sessionScanner: SessionQuotaScanner(sessionsDirectoryURL: paths.sessionsDirectoryURL),
                 logReader: logReader
             )
             let userNotifier = UserNotificationManager()
             let runtimeInspector = CodexRuntimeInspector(logReader: logReader)
+            sessionLogger?.info("runtime_inspector.init", metadata: ["state_database_path": paths.stateDatabaseURL.path])
             return AppViewModel(
                 paths: paths,
+                sessionLogger: sessionLogger,
                 databaseStore: dbStore,
                 credentialStore: credentialStore,
                 authFileManager: authFileManager,
@@ -245,6 +268,7 @@ final class AppViewModel: ObservableObject {
                 platformRuntimes: [CodexPlatformRuntime(), ClaudePlatformRuntime()]
             )
         } catch {
+            sessionLogger?.error("app_init.failed", metadata: ["error": error.localizedDescription])
             fatalError("Failed to build AppViewModel: \(error.localizedDescription)")
         }
     }
@@ -497,25 +521,37 @@ final class AppViewModel: ObservableObject {
     }
 
     func prepare() async {
-        guard !hasLoaded else { return }
+        guard !hasLoaded else {
+            sessionLogger?.info("prepare.skip_already_loaded")
+            return
+        }
         hasLoaded = true
 
+        sessionLogger?.info("database.load.begin")
         do {
             database = try await databaseStore.load()
             syncSelectedAccount(preferredAccountID: database.activeAccountID)
+            sessionLogger?.info("database.load.end", metadata: ["account_count": "\(database.accounts.count)"])
         } catch {
+            sessionLogger?.error("database.load.failure", metadata: ["error": error.localizedDescription])
             pushBanner(level: .error, message: L10n.tr("本地数据库读取失败：%@", error.localizedDescription))
         }
 
+        sessionLogger?.info("credentials.preload.begin")
         do {
             try credentialStore.preload()
+            sessionLogger?.info("credentials.preload.end")
         } catch {
+            sessionLogger?.error("credentials.preload.failure", metadata: ["error": error.localizedDescription])
             database.appendLog(level: .warning, message: L10n.tr("本地凭据缓存读取失败，将在需要时回退迁移：%@", error.localizedDescription))
         }
 
+        sessionLogger?.info("app_support_repair.begin")
         do {
-            _ = try appSupportPathRepairer.repairLegacyAbsolutePaths(in: paths.appSupportDirectoryURL)
+            let didRepair = try appSupportPathRepairer.repairLegacyAbsolutePaths(in: paths.appSupportDirectoryURL)
+            sessionLogger?.info("app_support_repair.end", metadata: ["updated": didRepair ? "true" : "false"])
         } catch {
+            sessionLogger?.error("app_support_repair.failure", metadata: ["error": error.localizedDescription])
             database.appendLog(level: .warning, message: L10n.tr("运行期目录路径修复失败：%@", error.localizedDescription))
             try? await persistDatabase()
         }
@@ -523,11 +559,16 @@ final class AppViewModel: ObservableObject {
         await importCurrentAuthIfNeeded()
         startQuotaMonitor()
         evaluateLowQuotaSwitchRecommendation()
+        sessionLogger?.info("prepare.complete")
     }
 
     func importCurrentAuthIfNeeded() async {
+        sessionLogger?.info("import_current_auth.begin")
         do {
-            guard let payload = try authFileManager.readCurrentAuth() else { return }
+            guard let payload = try authFileManager.readCurrentAuth() else {
+                sessionLogger?.info("import_current_auth.end", metadata: ["result": "no_auth_file"])
+                return
+            }
             let hasClaudeActiveAccount = database.account(id: database.activeAccountID)?.platform == .claude
             let identity = try resolveIdentity(from: payload)
             let account = try syncCurrentCodexAccount(identity: identity, payload: payload, makeActive: !hasClaudeActiveAccount)
@@ -543,7 +584,9 @@ final class AppViewModel: ObservableObject {
                 database.appendLog(level: .info, message: L10n.tr("已导入当前 ~/.codex/auth.json 对应的账号。"))
             }
             try await persistDatabase()
+            sessionLogger?.info("import_current_auth.end", metadata: ["account_id": account.id.uuidString, "result": "imported"])
         } catch {
+            sessionLogger?.error("import_current_auth.failure", metadata: ["error": error.localizedDescription])
             pushBanner(level: .warning, message: L10n.tr("当前 auth.json 无法导入：%@", error.localizedDescription))
         }
     }
@@ -1846,6 +1889,7 @@ final class AppViewModel: ObservableObject {
                 }
             }
         )
+        sessionLogger?.info("quota_monitor.start", metadata: ["active_account_id": activeCodexAccountID?.uuidString ?? "none"])
     }
 
     private func setActiveAccount(_ accountID: UUID?) {

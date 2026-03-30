@@ -29,7 +29,7 @@ struct AppPaths: Sendable {
         let codexHome = codexHomeOverride ?? AppPaths.resolveCodexHome(fileManager: fileManager)
         let claudeHome = claudeHomeOverride ?? AppPaths.resolveClaudeHome(fileManager: fileManager)
         let appSupport = try appSupportOverride
-            ?? AppPaths.resolveAppSupportDirectory(
+            ?? AppPaths.resolveDefaultAppSupportDirectory(
                 fileManager: fileManager,
                 rootOverride: applicationSupportRootOverride
             )
@@ -100,7 +100,7 @@ struct AppPaths: Sendable {
         return homeDirectory.appendingPathComponent(".claude", isDirectory: true)
     }
 
-    private static func resolveAppSupportDirectory(fileManager: FileManager, rootOverride: URL?) throws -> URL {
+    static func resolveDefaultAppSupportDirectory(fileManager: FileManager, rootOverride: URL?) throws -> URL {
         let root = try rootOverride ?? fileManager.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,

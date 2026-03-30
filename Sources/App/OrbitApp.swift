@@ -6,9 +6,14 @@ struct OrbitApp: App {
     @StateObject private var model: AppViewModel
 
     init() {
-        let liveModel = AppViewModel.live()
+        let logger = try? AppSessionLogger.live()
+        logger?.info("app_init.begin")
+
+        let liveModel = AppViewModel.live(sessionLogger: logger)
         _model = StateObject(wrappedValue: liveModel)
         AppRuntime.shared.model = liveModel
+        AppRuntime.shared.sessionLogger = logger
+        logger?.info("app_init.end")
     }
 
     var body: some Scene {

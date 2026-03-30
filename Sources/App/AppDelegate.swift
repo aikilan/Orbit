@@ -5,31 +5,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBarController: StatusBarController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppRuntime.shared.sessionLogger?.info("did_finish_launching.begin")
+
         if let exportRequest = IconExportRequest.current {
             NSApp.setActivationPolicy(.prohibited)
+            AppRuntime.shared.sessionLogger?.info("activation_policy.set", metadata: ["policy": "prohibited"])
             do {
                 try AppIconArtwork.exportAssets(to: exportRequest.outputDirectory)
+                AppRuntime.shared.sessionLogger?.info("icon_export.complete")
             } catch {
+                AppRuntime.shared.sessionLogger?.error("icon_export.failure", metadata: ["error": error.localizedDescription])
                 fputs("\(L10n.tr("导出图标失败: %@", error.localizedDescription))\n", stderr)
             }
+            AppRuntime.shared.sessionLogger?.info("application_terminate.requested", metadata: ["reason": "icon_export"])
             NSApp.terminate(nil)
             return
         }
 
         NSApp.setActivationPolicy(.regular)
+        AppRuntime.shared.sessionLogger?.info("activation_policy.set", metadata: ["policy": "regular"])
         AppIconArtwork.applyApplicationIcon()
+        AppRuntime.shared.sessionLogger?.info("application_icon.applied")
 
         if let model = AppRuntime.shared.model {
             installStatusBarControllerIfNeeded(with: model)
+        } else {
+            AppRuntime.shared.sessionLogger?.warning("status_bar.install.skipped", metadata: ["reason": "model_missing"])
         }
     }
 
     func installStatusBarControllerIfNeeded(with model: AppViewModel) {
-        guard statusBarController == nil else { return }
+        guard statusBarController == nil else {
+            AppRuntime.shared.sessionLogger?.info("status_bar.install.skipped", metadata: ["reason": "already_installed"])
+            return
+        }
 
         statusBarController = StatusBarController(model: model) { [weak self] id in
             self?.presentWindow(id: id, using: model)
         }
+        AppRuntime.shared.sessionLogger?.info("status_bar.install.complete")
     }
 
     func refreshLocalization() {

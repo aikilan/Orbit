@@ -216,6 +216,7 @@ private struct NoopClaudeProviderCodexBridgeManager: ClaudeProviderCodexBridgeMa
 extension AppViewModel {
     convenience init(
         paths: AppPaths,
+        sessionLogger: AppSessionLogger? = nil,
         databaseStore: AppDatabaseStore,
         credentialStore: any AccountCredentialStore,
         authFileManager: any AuthFileManaging,
@@ -237,6 +238,7 @@ extension AppViewModel {
     ) {
         self.init(
             paths: paths,
+            sessionLogger: sessionLogger,
             databaseStore: databaseStore,
             credentialStore: credentialStore,
             authFileManager: authFileManager,

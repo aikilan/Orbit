@@ -191,7 +191,8 @@ final class AppViewModelTests: XCTestCase {
             oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
             runtimeInspector: MockRuntimeInspector(result: .verified),
             activeAccountID: accountID,
-            appSupportPathRepairer: repairer
+            appSupportPathRepairer: repairer,
+            enableSessionLogger: true
         )
 
         await harness.model.prepare()
@@ -199,6 +200,9 @@ final class AppViewModelTests: XCTestCase {
 
         XCTAssertEqual(repairer.repairCallCount, 1)
         XCTAssertEqual(repairer.lastAppSupportDirectoryURL, harness.model.paths.appSupportDirectoryURL)
+        let log = try readSessionLog(from: harness)
+        XCTAssertEqual(occurrenceCount(of: "database.load.begin", in: log), 1)
+        XCTAssertEqual(occurrenceCount(of: "prepare.skip_already_loaded", in: log), 1)
     }
 
     func testPrepareContinuesWhenAppSupportPathRepairFails() async throws {
@@ -214,7 +218,8 @@ final class AppViewModelTests: XCTestCase {
             oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
             runtimeInspector: MockRuntimeInspector(result: .verified),
             activeAccountID: accountID,
-            appSupportPathRepairer: repairer
+            appSupportPathRepairer: repairer,
+            enableSessionLogger: true
         )
 
         await harness.model.prepare()
@@ -226,6 +231,57 @@ final class AppViewModelTests: XCTestCase {
                 $0.level == .warning && $0.message.contains("运行期目录路径修复失败")
             }
         )
+        let log = try readSessionLog(from: harness)
+        XCTAssertTrue(log.contains("app_support_repair.failure"))
+        XCTAssertTrue(log.contains("prepare.complete"))
+    }
+
+    func testPrepareWritesSessionLogForSuccessfulInitialization() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            activeAccountID: accountID,
+            enableSessionLogger: true
+        )
+
+        await harness.model.prepare()
+
+        let log = try readSessionLog(from: harness)
+        XCTAssertTrue(log.contains("database.load.begin"))
+        XCTAssertTrue(log.contains("database.load.end account_count=1"))
+        XCTAssertTrue(log.contains("credentials.preload.begin"))
+        XCTAssertTrue(log.contains("credentials.preload.end"))
+        XCTAssertTrue(log.contains("app_support_repair.begin"))
+        XCTAssertTrue(log.contains("app_support_repair.end updated=false"))
+        XCTAssertTrue(log.contains("import_current_auth.begin"))
+        XCTAssertTrue(log.contains("import_current_auth.end result=no_auth_file"))
+        XCTAssertTrue(log.contains("quota_monitor.start"))
+        XCTAssertTrue(log.contains("prepare.complete"))
+    }
+
+    func testPrepareWritesSessionLogWhenDatabaseLoadFails() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            enableSessionLogger: true
+        )
+        try "{invalid json}".write(to: harness.model.paths.databaseURL, atomically: true, encoding: .utf8)
+
+        await harness.model.prepare()
+
+        let log = try readSessionLog(from: harness)
+        XCTAssertTrue(log.contains("database.load.failure"))
+        XCTAssertTrue(log.contains("prepare.complete"))
     }
 
     func testPreparePassivelyImportsCurrentCodexAuthWhenClaudeIsActive() async throws {
@@ -2620,7 +2676,8 @@ final class AppViewModelTests: XCTestCase {
         codexOAuthClaudeBridgeManager: any CodexOAuthClaudeBridgeManaging = RecordingCodexOAuthClaudeBridgeManager(),
         openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging = RecordingOpenAICompatibleProviderCodexBridgeManager(),
         claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging = RecordingClaudeProviderCodexBridgeManager(),
-        bannerAutoDismissDuration: Duration = .seconds(10)
+        bannerAutoDismissDuration: Duration = .seconds(10),
+        enableSessionLogger: Bool = false
     ) async throws -> AppViewModelHarness {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -2632,6 +2689,7 @@ final class AppViewModelTests: XCTestCase {
         let paths = try AppPaths(fileManager: fileManager, codexHomeOverride: codexHome, appSupportOverride: appSupport)
         let databaseStore = AppDatabaseStore(databaseURL: paths.databaseURL)
         let credentialStore = InMemoryCredentialStore()
+        let sessionLogger = enableSessionLogger ? try AppSessionLogger(appSupportDirectoryURL: appSupport) : nil
 
         let isPrimaryAccountActive = activeAccountID == accountID
         let account: ManagedAccount
@@ -2704,6 +2762,7 @@ final class AppViewModelTests: XCTestCase {
 
         let model = AppViewModel(
             paths: paths,
+            sessionLogger: sessionLogger,
             databaseStore: databaseStore,
             credentialStore: credentialStore,
             authFileManager: authFileManager,
@@ -2728,7 +2787,8 @@ final class AppViewModelTests: XCTestCase {
             credentialStore: credentialStore,
             authFileManager: authFileManager,
             quotaMonitor: quotaMonitor,
-            userNotifier: userNotifier
+            userNotifier: userNotifier,
+            sessionLogger: sessionLogger
         )
     }
 
@@ -2798,6 +2858,15 @@ final class AppViewModelTests: XCTestCase {
         FileManager.default.temporaryDirectory.appendingPathComponent(name, isDirectory: true)
     }
 
+    private func readSessionLog(from harness: AppViewModelHarness) throws -> String {
+        let logger = try XCTUnwrap(harness.sessionLogger)
+        return try String(contentsOf: logger.latestLogURL, encoding: .utf8)
+    }
+
+    private func occurrenceCount(of substring: String, in text: String) -> Int {
+        text.components(separatedBy: substring).count - 1
+    }
+
     private func makeSignedLikePayload(
         accountID: String,
         refreshToken: String,
@@ -2853,6 +2922,7 @@ private struct AppViewModelHarness {
     let authFileManager: RecordingAuthFileManager
     let quotaMonitor: any QuotaMonitoring
     let userNotifier: any UserNotifying
+    let sessionLogger: AppSessionLogger?
 }
 
 private final class RecordingAuthFileManager: AuthFileManaging {
