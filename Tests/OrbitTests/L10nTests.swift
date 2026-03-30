@@ -2,6 +2,24 @@ import XCTest
 @testable import Orbit
 
 final class L10nTests: XCTestCase {
+    func testSystemLanguagePreferenceUsesFirstSupportedLanguage() {
+        XCTAssertEqual(
+            L10n.resolvedSystemLanguagePreference(preferredLanguages: ["en-US", "zh-Hans"]),
+            .english
+        )
+        XCTAssertEqual(
+            L10n.resolvedSystemLanguagePreference(preferredLanguages: ["ja-JP", "zh-Hans", "en-US"]),
+            .simplifiedChinese
+        )
+    }
+
+    func testSystemLanguagePreferenceFallsBackToEnglishWhenNoSupportedLanguageExists() {
+        XCTAssertEqual(
+            L10n.resolvedSystemLanguagePreference(preferredLanguages: ["ja-JP", "fr-FR"]),
+            .english
+        )
+    }
+
     func testManualLanguagePreferenceOverridesLocalization() {
         let originalPreference = L10n.currentLanguagePreference
         defer {

@@ -37,10 +37,23 @@ enum L10n {
         UserDefaults.standard.set(preference.rawValue, forKey: languagePreferenceKey)
     }
 
+    static func resolvedSystemLanguagePreference(preferredLanguages: [String] = Locale.preferredLanguages) -> AppLanguagePreference {
+        for language in preferredLanguages {
+            if language.hasPrefix("zh") {
+                return .simplifiedChinese
+            }
+            if language.hasPrefix("en") {
+                return .english
+            }
+        }
+
+        return .english
+    }
+
     private static var resolvedTranslations: [String: String] {
         switch currentLanguagePreference {
         case .system:
-            if Locale.preferredLanguages.contains(where: { $0.hasPrefix("zh") }) {
+            if resolvedSystemLanguagePreference() == .simplifiedChinese {
                 return simplifiedChineseTranslations
             }
         case .english:
