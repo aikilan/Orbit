@@ -232,6 +232,20 @@ enum ProviderCatalog {
     }
 }
 
+func isMiniMaxAPIHost(_ baseURL: String) -> Bool {
+    let trimmedBaseURL = baseURL
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    guard !trimmedBaseURL.isEmpty else {
+        return false
+    }
+
+    let rawURL = URL(string: trimmedBaseURL)
+        ?? URL(string: "https://\(trimmedBaseURL)")
+    let host = rawURL?.host?.lowercased()
+    return host == "api.minimax.io" || host == "api.minimaxi.com"
+}
+
 func normalizedMiniMaxAnthropicBaseURL(_ baseURL: String, includeVersion: Bool) -> String? {
     let trimmedBaseURL = baseURL
         .trimmingCharacters(in: .whitespacesAndNewlines)

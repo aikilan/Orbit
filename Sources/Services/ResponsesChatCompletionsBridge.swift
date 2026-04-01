@@ -15,12 +15,20 @@ enum ResponsesChatCompletionsBridge {
         }
     }
 
-    static func makeChatCompletionsRequestData(from data: Data, fallbackModel: String) throws -> Data {
+    static func makeChatCompletionsRequestData(
+        from data: Data,
+        fallbackModel: String,
+        requiresNonEmptyToolParameters: Bool = false
+    ) throws -> Data {
         guard let request = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw TranslationError.invalidRequest(L10n.tr("Responses 请求不是有效的 JSON。"))
         }
 
-        let object = try makeChatCompletionsRequestObject(from: request, fallbackModel: fallbackModel)
+        let object = try makeChatCompletionsRequestObject(
+            from: request,
+            fallbackModel: fallbackModel,
+            requiresNonEmptyToolParameters: requiresNonEmptyToolParameters
+        )
         return try JSONSerialization.data(withJSONObject: object, options: [])
     }
 
@@ -269,12 +277,16 @@ enum ResponsesChatCompletionsBridge {
 
     private static func makeChatCompletionsRequestObject(
         from request: [String: Any],
-        fallbackModel: String
+        fallbackModel: String,
+        requiresNonEmptyToolParameters: Bool
     ) throws -> [String: Any] {
         let model = trimmedString(request["model"]) ?? fallbackModel
         let instructions = trimmedString(request["instructions"])
         let messages = try translateMessages(from: request["input"], instructions: instructions)
-        let tools = translateTools(from: request["tools"])
+        let tools = translateTools(
+            from: request["tools"],
+            requiresNonEmptyToolParameters: requiresNonEmptyToolParameters
+        )
         let toolChoice = translateToolChoice(from: request["tool_choice"])
 
         var body: [String: Any] = [
@@ -446,7 +458,10 @@ enum ResponsesChatCompletionsBridge {
         ]
     }
 
-    private static func translateTools(from value: Any?) -> [[String: Any]] {
+    private static func translateTools(
+        from value: Any?,
+        requiresNonEmptyToolParameters: Bool
+    ) -> [[String: Any]] {
         guard let tools = value as? [Any] else {
             return []
         }
@@ -463,7 +478,10 @@ enum ResponsesChatCompletionsBridge {
             if let description = trimmedString(tool["description"]) {
                 function["description"] = description
             }
-            if let parameters = tool["parameters"] ?? tool["input_schema"] {
+            if let parameters = normalizedToolParameters(
+                from: tool["parameters"] ?? tool["input_schema"],
+                requiresNonEmptyToolParameters: requiresNonEmptyToolParameters
+            ) {
                 function["parameters"] = parameters
             }
 
@@ -472,6 +490,43 @@ enum ResponsesChatCompletionsBridge {
                 "function": function,
             ]
         }
+    }
+
+    private static func normalizedToolParameters(
+        from value: Any?,
+        requiresNonEmptyToolParameters: Bool
+    ) -> [String: Any]? {
+        guard var parameters = value as? [String: Any] else {
+            return requiresNonEmptyToolParameters ? compatibilityPlaceholderParameters() : nil
+        }
+
+        guard requiresNonEmptyToolParameters else {
+            return parameters
+        }
+
+        guard trimmedString(parameters["type"]) == "object" else {
+            return parameters
+        }
+
+        let properties = parameters["properties"] as? [String: Any] ?? [:]
+        guard properties.isEmpty else {
+            return parameters
+        }
+
+        parameters["properties"] = compatibilityPlaceholderParameters()["properties"]
+        return parameters
+    }
+
+    private static func compatibilityPlaceholderParameters() -> [String: Any] {
+        [
+            "type": "object",
+            "properties": [
+                "_compat": [
+                    "type": "boolean",
+                    "description": "Compatibility placeholder.",
+                ],
+            ],
+        ]
     }
 
     private static func translateToolChoice(from value: Any?) -> Any? {

@@ -282,7 +282,8 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
             let wantsStream = (requestObject["stream"] as? Bool) ?? false
             let upstreamRequest = try ResponsesChatCompletionsBridge.makeChatCompletionsRequestData(
                 from: request.body,
-                fallbackModel: state.defaultModel
+                fallbackModel: state.defaultModel,
+                requiresNonEmptyToolParameters: isMiniMaxAPIHost(state.baseURL)
             )
             let (statusCode, data) = try await sendUpstreamRequest(state.baseURL, state.apiKey, upstreamRequest)
 

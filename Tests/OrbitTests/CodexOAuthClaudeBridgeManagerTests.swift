@@ -117,6 +117,38 @@ final class CodexOAuthClaudeBridgeManagerTests: XCTestCase {
         XCTAssertEqual((object["usage"] as? [String: Any])?["total_tokens"] as? Int, 15)
     }
 
+    func testResponsesChatCompletionsBridgeFillsEmptyToolParametersForMiniMaxCompatibility() throws {
+        let request = try JSONSerialization.data(withJSONObject: [
+            "model": "MiniMax-M2.7",
+            "input": "关闭页面",
+            "tools": [
+                [
+                    "type": "function",
+                    "name": "browser_close",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [:],
+                        "additionalProperties": false,
+                    ],
+                ],
+            ],
+        ])
+
+        let bridged = try ResponsesChatCompletionsBridge.makeChatCompletionsRequestData(
+            from: request,
+            fallbackModel: "MiniMax-M2.7",
+            requiresNonEmptyToolParameters: true
+        )
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: bridged) as? [String: Any])
+        let tools = try XCTUnwrap(object["tools"] as? [[String: Any]])
+        let function = try XCTUnwrap(tools.first?["function"] as? [String: Any])
+        let parameters = try XCTUnwrap(function["parameters"] as? [String: Any])
+        let properties = try XCTUnwrap(parameters["properties"] as? [String: Any])
+
+        XCTAssertEqual(Array(properties.keys), ["_compat"])
+        XCTAssertEqual(parameters["additionalProperties"] as? Bool, false)
+    }
+
     func testResponsesBridgeRequestUsesStreamingAndListInput() throws {
         let request = try JSONSerialization.data(withJSONObject: [
             "model": "gpt-5.4",

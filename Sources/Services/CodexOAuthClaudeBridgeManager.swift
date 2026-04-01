@@ -144,7 +144,8 @@ private func defaultCodexOAuthClaudeBridgeUpstreamRequest(
         let fallbackModel = CodexOAuthClaudeBridgeServer.trimmedString(requestObject?["model"]) ?? "gpt-5.4"
         let chatRequest = try ResponsesChatCompletionsBridge.makeChatCompletionsRequestData(
             from: body,
-            fallbackModel: fallbackModel
+            fallbackModel: fallbackModel,
+            requiresNonEmptyToolParameters: isMiniMaxAPIHost(trimmedBaseURL)
         )
         var request = URLRequest(url: URL(string: "\(trimmedBaseURL)/chat/completions")!)
         request.httpMethod = "POST"

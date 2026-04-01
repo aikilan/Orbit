@@ -179,6 +179,93 @@ final class OpenAICompatibleProviderCodexBridgeManagerTests: XCTestCase {
         XCTAssertTrue(text.contains("data: [DONE]"))
     }
 
+    func testMiniMaxBridgeFillsEmptyToolParametersBeforeForwarding() async throws {
+        actor Recorder {
+            var lastRequestBody: Data?
+
+            func store(_ data: Data) {
+                lastRequestBody = data
+            }
+
+            func body() -> Data? {
+                lastRequestBody
+            }
+        }
+
+        let recorder = Recorder()
+        let upstreamResponse = try JSONSerialization.data(withJSONObject: [
+            "id": "chatcmpl_test",
+            "model": "MiniMax-M2.7",
+            "choices": [
+                [
+                    "index": 0,
+                    "message": [
+                        "role": "assistant",
+                        "content": "done",
+                    ],
+                    "finish_reason": "stop",
+                ],
+            ],
+            "usage": [
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            ],
+        ])
+
+        let manager = OpenAICompatibleProviderCodexBridgeManager(
+            sendUpstreamRequest: { _, _, body in
+                await recorder.store(body)
+                return (200, upstreamResponse)
+            }
+        )
+
+        let bridge = try await manager.prepareBridge(
+            accountID: UUID(),
+            baseURL: "https://api.minimax.io/v1",
+            apiKeyEnvName: "MINIMAX_API_KEY",
+            apiKey: "sk-minimax-test",
+            model: "MiniMax-M2.7",
+            availableModels: ["MiniMax-M2.7"]
+        )
+
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(bridge.baseURL)/v1/responses")))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": "MiniMax-M2.7",
+            "stream": false,
+            "input": "关闭页面",
+            "tools": [
+                [
+                    "type": "function",
+                    "name": "browser_close",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [:],
+                        "additionalProperties": false,
+                    ],
+                ],
+            ],
+        ])
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        let session = URLSession(configuration: configuration)
+        _ = try await session.data(for: request)
+
+        let capturedBody = await recorder.body()
+        let upstreamBody = try XCTUnwrap(capturedBody)
+        let upstreamRequestObject = try XCTUnwrap(try JSONSerialization.jsonObject(with: upstreamBody) as? [String: Any])
+        let tools = try XCTUnwrap(upstreamRequestObject["tools"] as? [[String: Any]])
+        let function = try XCTUnwrap(tools.first?["function"] as? [String: Any])
+        let parameters = try XCTUnwrap(function["parameters"] as? [String: Any])
+        let properties = try XCTUnwrap(parameters["properties"] as? [String: Any])
+
+        XCTAssertEqual(Array(properties.keys), ["_compat"])
+        XCTAssertEqual(parameters["additionalProperties"] as? Bool, false)
+    }
+
     func testModelsEndpointReturnsAvailableModelsAndAppendsDefaultModel() async throws {
         let manager = OpenAICompatibleProviderCodexBridgeManager(
             sendUpstreamRequest: { _, _, _ in
