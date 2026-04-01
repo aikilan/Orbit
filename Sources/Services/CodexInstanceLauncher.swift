@@ -38,6 +38,21 @@ struct CodexInstanceLauncher {
         payload: CodexAuthPayload,
         appSupportDirectoryURL: URL
     ) throws -> IsolatedCodexLaunchPaths {
+        let paths = isolatedLaunchPaths(for: account.id, appSupportDirectoryURL: appSupportDirectoryURL)
+        let context = ResolvedCodexDesktopLaunchContext(
+            accountID: account.id,
+            codexHomeURL: paths.codexHomeURL,
+            authPayload: payload,
+            modelCatalogSnapshot: nil,
+            configFileContents: nil,
+            environmentVariables: [:]
+        )
+        return try launchIsolatedInstance(context: context)
+    }
+
+    func launchIsolatedInstance(
+        context: ResolvedCodexDesktopLaunchContext
+    ) throws -> IsolatedCodexLaunchPaths {
         guard let appURL = resolveAppURL() else {
             throw CodexInstanceLauncherError.applicationNotFound
         }
@@ -47,15 +62,20 @@ struct CodexInstanceLauncher {
             throw CodexInstanceLauncherError.executableNotFound
         }
 
-        let paths = isolatedLaunchPaths(for: account, appSupportDirectoryURL: appSupportDirectoryURL)
-        try fileManager.createDirectory(at: paths.codexHomeURL, withIntermediateDirectories: true)
+        let paths = isolatedLaunchPaths(for: context)
         try fileManager.createDirectory(at: paths.userDataURL, withIntermediateDirectories: true)
-
-        let authFileURL = paths.codexHomeURL.appendingPathComponent("auth.json")
-        try AuthFileManager(authFileURL: authFileURL, fileManager: fileManager).activate(payload)
+        try CodexManagedHomeWriter(fileManager: fileManager).prepareManagedHome(
+            codexHomeURL: context.codexHomeURL,
+            authPayload: context.authPayload,
+            configFileContents: context.configFileContents,
+            modelCatalogSnapshot: context.modelCatalogSnapshot
+        )
 
         var environment = ProcessInfo.processInfo.environment
-        environment["CODEX_HOME"] = paths.codexHomeURL.path
+        for (key, value) in context.environmentVariables {
+            environment[key] = value
+        }
+        environment["CODEX_HOME"] = context.codexHomeURL.path
 
         try runProcess(
             executableURL,
@@ -67,16 +87,27 @@ struct CodexInstanceLauncher {
     }
 
     private func isolatedLaunchPaths(
-        for account: ManagedAccount,
+        for accountID: UUID,
         appSupportDirectoryURL: URL
     ) -> IsolatedCodexLaunchPaths {
         let rootDirectoryURL = appSupportDirectoryURL
             .appendingPathComponent(Self.instancesDirectoryName, isDirectory: true)
-            .appendingPathComponent(account.id.uuidString, isDirectory: true)
+            .appendingPathComponent(accountID.uuidString, isDirectory: true)
 
         return IsolatedCodexLaunchPaths(
             rootDirectoryURL: rootDirectoryURL,
             codexHomeURL: rootDirectoryURL.appendingPathComponent("codex-home", isDirectory: true),
+            userDataURL: rootDirectoryURL.appendingPathComponent("user-data", isDirectory: true)
+        )
+    }
+
+    private func isolatedLaunchPaths(
+        for context: ResolvedCodexDesktopLaunchContext
+    ) -> IsolatedCodexLaunchPaths {
+        let rootDirectoryURL = context.codexHomeURL.deletingLastPathComponent()
+        return IsolatedCodexLaunchPaths(
+            rootDirectoryURL: rootDirectoryURL,
+            codexHomeURL: context.codexHomeURL,
             userDataURL: rootDirectoryURL.appendingPathComponent("user-data", isDirectory: true)
         )
     }

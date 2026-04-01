@@ -304,24 +304,30 @@ final class OAuthClient: @unchecked Sendable {
         try validateHTTP(response: response, data: data)
 
         let usageResponse = try JSONDecoder().decode(UsageResponse.self, from: data)
+        return try buildUsageSnapshot(from: usageResponse)
+    }
+
+    private func buildUsageSnapshot(from usageResponse: UsageResponse) throws -> UsageRefreshResult {
         guard let rateLimit = usageResponse.rateLimit else {
             throw OAuthClientError.invalidUsageResponse
         }
-        guard let secondaryWindow = rateLimit.secondaryWindow else {
+        guard let primaryWindow = rateLimit.primaryWindow ?? rateLimit.secondaryWindow else {
             throw OAuthClientError.invalidUsageResponse
         }
 
         let snapshot = QuotaSnapshot(
             primary: RateLimitWindowSnapshot(
-                usedPercent: rateLimit.primaryWindow.usedPercent,
-                windowMinutes: rateLimit.primaryWindow.limitWindowSeconds / 60,
-                resetsAt: Date(timeIntervalSince1970: TimeInterval(rateLimit.primaryWindow.resetAt))
+                usedPercent: primaryWindow.usedPercent,
+                windowMinutes: primaryWindow.limitWindowSeconds / 60,
+                resetsAt: primaryWindow.resetAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
             ),
-            secondary: RateLimitWindowSnapshot(
-                usedPercent: secondaryWindow.usedPercent,
-                windowMinutes: secondaryWindow.limitWindowSeconds / 60,
-                resetsAt: Date(timeIntervalSince1970: TimeInterval(secondaryWindow.resetAt))
-            ),
+            secondary: (rateLimit.primaryWindow == nil ? nil : rateLimit.secondaryWindow).map {
+                RateLimitWindowSnapshot(
+                    usedPercent: $0.usedPercent,
+                    windowMinutes: $0.limitWindowSeconds / 60,
+                    resetsAt: $0.resetAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+                )
+            },
             credits: usageResponse.credits.map {
                 CreditsSnapshot(hasCredits: $0.hasCredits, unlimited: $0.unlimited, balance: $0.balance)
             },
@@ -334,8 +340,8 @@ final class OAuthClient: @unchecked Sendable {
             snapshot: snapshot,
             email: usageResponse.email,
             planType: usageResponse.planType,
-            allowed: rateLimit.allowed,
-            limitReached: rateLimit.limitReached,
+            allowed: rateLimit.allowed ?? usageResponse.subscriptionDetails?.allowed ?? true,
+            limitReached: rateLimit.limitReached ?? usageResponse.subscriptionDetails?.limitReached ?? false,
             subscriptionDetails: usageResponse.subscriptionDetails
         )
     }
@@ -544,10 +550,10 @@ private struct UsageResponse: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: DynamicCodingKey.self)
-        email = try container.decodeIfPresent(String.self, forKey: DynamicCodingKey("email"))
-        planType = try container.decodeIfPresent(String.self, forKey: DynamicCodingKey("plan_type"))
-        rateLimit = try container.decodeIfPresent(RateLimitDetails.self, forKey: DynamicCodingKey("rate_limit"))
-        credits = try container.decodeIfPresent(Credits.self, forKey: DynamicCodingKey("credits"))
+        email = Self.decodeString(in: container, keys: ["email"])
+        planType = Self.decodeString(in: container, keys: ["plan_type"])
+        rateLimit = Self.decodeRateLimit(in: container, key: "rate_limit")
+        credits = Self.decodeCredits(in: container, key: "credits")
 
         var details = try Self.decodeSubscriptionDetails(from: container)
         if let rateLimit {
@@ -559,42 +565,23 @@ private struct UsageResponse: Decodable {
         subscriptionDetails = details?.hasAnyValue == true ? details : nil
     }
 
-    struct RateLimitDetails: Codable {
-        let allowed: Bool
-        let limitReached: Bool
-        let primaryWindow: Window
+    struct RateLimitDetails {
+        let allowed: Bool?
+        let limitReached: Bool?
+        let primaryWindow: Window?
         let secondaryWindow: Window?
-
-        enum CodingKeys: String, CodingKey {
-            case allowed
-            case limitReached = "limit_reached"
-            case primaryWindow = "primary_window"
-            case secondaryWindow = "secondary_window"
-        }
     }
 
-    struct Window: Codable {
+    struct Window {
         let usedPercent: Double
         let limitWindowSeconds: Int
-        let resetAt: Int
-
-        enum CodingKeys: String, CodingKey {
-            case usedPercent = "used_percent"
-            case limitWindowSeconds = "limit_window_seconds"
-            case resetAt = "reset_at"
-        }
+        let resetAt: Int?
     }
 
-    struct Credits: Codable {
+    struct Credits {
         let hasCredits: Bool
         let unlimited: Bool
         let balance: Double?
-
-        enum CodingKeys: String, CodingKey {
-            case hasCredits = "has_credits"
-            case unlimited
-            case balance
-        }
     }
 
     private static func decodeSubscriptionDetails(
@@ -603,13 +590,82 @@ private struct UsageResponse: Decodable {
         var details = decodeSubscriptionDetails(in: container)
         for key in ["subscription", "plan", "account_plan", "subscription_plan"] {
             let codingKey = DynamicCodingKey(key)
-            guard container.contains(codingKey) else { continue }
-            let nested = try container.nestedContainer(keyedBy: DynamicCodingKey.self, forKey: codingKey)
+            guard container.contains(codingKey),
+                  let nested = try? container.nestedContainer(keyedBy: DynamicCodingKey.self, forKey: codingKey) else {
+                continue
+            }
             if let nestedDetails = decodeSubscriptionDetails(in: nested) {
                 details = nestedDetails.merged(over: details)
             }
         }
         return details?.hasAnyValue == true ? details : nil
+    }
+
+    private static func decodeRateLimit(
+        in container: KeyedDecodingContainer<DynamicCodingKey>,
+        key: String
+    ) -> RateLimitDetails? {
+        let codingKey = DynamicCodingKey(key)
+        guard container.contains(codingKey),
+              let nested = try? container.nestedContainer(keyedBy: DynamicCodingKey.self, forKey: codingKey) else {
+            return nil
+        }
+
+        let allowed = decodeBool(in: nested, keys: ["allowed", "is_allowed"])
+        let limitReached = decodeBool(in: nested, keys: ["limit_reached", "is_limit_reached"])
+        let primaryWindow = decodeWindow(in: nested, key: "primary_window")
+        let secondaryWindow = decodeWindow(in: nested, key: "secondary_window")
+
+        guard allowed != nil || limitReached != nil || primaryWindow != nil || secondaryWindow != nil else {
+            return nil
+        }
+
+        return RateLimitDetails(
+            allowed: allowed,
+            limitReached: limitReached,
+            primaryWindow: primaryWindow,
+            secondaryWindow: secondaryWindow
+        )
+    }
+
+    private static func decodeWindow(
+        in container: KeyedDecodingContainer<DynamicCodingKey>,
+        key: String
+    ) -> Window? {
+        let codingKey = DynamicCodingKey(key)
+        guard container.contains(codingKey),
+              let nested = try? container.nestedContainer(keyedBy: DynamicCodingKey.self, forKey: codingKey),
+              let usedPercent = decodeDouble(in: nested, keys: ["used_percent"]),
+              let limitWindowSeconds = decodeInt(in: nested, keys: ["limit_window_seconds"]) else {
+            return nil
+        }
+
+        return Window(
+            usedPercent: usedPercent,
+            limitWindowSeconds: limitWindowSeconds,
+            resetAt: decodeInt(in: nested, keys: ["reset_at"])
+        )
+    }
+
+    private static func decodeCredits(
+        in container: KeyedDecodingContainer<DynamicCodingKey>,
+        key: String
+    ) -> Credits? {
+        let codingKey = DynamicCodingKey(key)
+        guard container.contains(codingKey),
+              let nested = try? container.nestedContainer(keyedBy: DynamicCodingKey.self, forKey: codingKey) else {
+            return nil
+        }
+
+        let hasCredits = decodeBool(in: nested, keys: ["has_credits"]) ?? false
+        let unlimited = decodeBool(in: nested, keys: ["unlimited"]) ?? false
+        let balance = decodeDouble(in: nested, keys: ["balance"])
+
+        guard hasCredits || unlimited || balance != nil else {
+            return nil
+        }
+
+        return Credits(hasCredits: hasCredits, unlimited: unlimited, balance: balance)
     }
 
     private static func decodeSubscriptionDetails(
@@ -631,6 +687,29 @@ private struct UsageResponse: Decodable {
         return details.hasAnyValue ? details : nil
     }
 
+    private static func decodeString(
+        in container: KeyedDecodingContainer<DynamicCodingKey>,
+        keys: [String]
+    ) -> String? {
+        for key in keys {
+            let codingKey = DynamicCodingKey(key)
+            if let value = try? container.decodeIfPresent(String.self, forKey: codingKey),
+               let normalized = normalizedString(value) {
+                return normalized
+            }
+            if let value = try? container.decodeIfPresent(Int.self, forKey: codingKey) {
+                return "\(value)"
+            }
+            if let value = try? container.decodeIfPresent(Double.self, forKey: codingKey) {
+                return "\(value)"
+            }
+            if let value = try? container.decodeIfPresent(Bool.self, forKey: codingKey) {
+                return value ? "true" : "false"
+            }
+        }
+        return nil
+    }
+
     private static func decodeBool(
         in container: KeyedDecodingContainer<DynamicCodingKey>,
         keys: [String]
@@ -645,7 +724,7 @@ private struct UsageResponse: Decodable {
             }
             if let value = try? container.decodeIfPresent(String.self, forKey: codingKey),
                let normalized = normalizedString(value) {
-                switch normalized {
+                switch normalized.lowercased() {
                 case "true", "1", "yes":
                     return true
                 case "false", "0", "no":
@@ -653,6 +732,48 @@ private struct UsageResponse: Decodable {
                 default:
                     continue
                 }
+            }
+        }
+        return nil
+    }
+
+    private static func decodeInt(
+        in container: KeyedDecodingContainer<DynamicCodingKey>,
+        keys: [String]
+    ) -> Int? {
+        for key in keys {
+            let codingKey = DynamicCodingKey(key)
+            if let value = try? container.decodeIfPresent(Int.self, forKey: codingKey) {
+                return value
+            }
+            if let value = try? container.decodeIfPresent(Double.self, forKey: codingKey) {
+                return Int(value)
+            }
+            if let value = try? container.decodeIfPresent(String.self, forKey: codingKey),
+               let normalized = normalizedString(value),
+               let intValue = Int(normalized) {
+                return intValue
+            }
+        }
+        return nil
+    }
+
+    private static func decodeDouble(
+        in container: KeyedDecodingContainer<DynamicCodingKey>,
+        keys: [String]
+    ) -> Double? {
+        for key in keys {
+            let codingKey = DynamicCodingKey(key)
+            if let value = try? container.decodeIfPresent(Double.self, forKey: codingKey) {
+                return value
+            }
+            if let value = try? container.decodeIfPresent(Int.self, forKey: codingKey) {
+                return Double(value)
+            }
+            if let value = try? container.decodeIfPresent(String.self, forKey: codingKey),
+               let normalized = normalizedString(value),
+               let doubleValue = Double(normalized) {
+                return doubleValue
             }
         }
         return nil

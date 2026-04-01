@@ -32,6 +32,8 @@ final class WindowRouter {
             titles = [L10n.tr("Orbit")]
         case "add-account":
             titles = [L10n.tr("新增账号"), "新增账号", "Add Account"]
+        case "launch-provider-desktop":
+            titles = [L10n.tr("预设启动 Codex"), "预设启动 Codex"]
         default:
             titles = []
         }

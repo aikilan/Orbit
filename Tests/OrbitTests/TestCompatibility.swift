@@ -153,8 +153,8 @@ private struct NoopClaudeCLILauncher: ClaudeCLILaunching {
 }
 
 private struct NoopClaudePatchedRuntimeManager: ClaudePatchedRuntimeManaging {
-    func preparePatchedRuntime(model: String, appSupportDirectoryURL: URL) throws -> URL {
-        appSupportDirectoryURL.appendingPathComponent("noop-claude", isDirectory: false)
+    func resolveExecutableOverride(model: String, appSupportDirectoryURL: URL) throws -> URL? {
+        nil
     }
 }
 

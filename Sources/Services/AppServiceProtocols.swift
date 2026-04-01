@@ -39,10 +39,10 @@ protocol ClaudeAPIClienting: Sendable {
 }
 
 protocol ClaudePatchedRuntimeManaging: Sendable {
-    func preparePatchedRuntime(
+    func resolveExecutableOverride(
         model: String,
         appSupportDirectoryURL: URL
-    ) throws -> URL
+    ) throws -> URL?
 }
 
 protocol AppSupportPathRepairing: Sendable {
@@ -138,6 +138,15 @@ protocol CLIEnvironmentResolving: Sendable {
         claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging
     ) async throws -> ResolvedCodexCLILaunchContext
 
+    func resolveCodexDesktopContext(
+        for account: ManagedAccount,
+        appPaths: AppPaths,
+        authPayload: CodexAuthPayload?,
+        providerAPIKeyCredential: ProviderAPIKeyCredential?,
+        openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging,
+        claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging
+    ) async throws -> ResolvedCodexDesktopLaunchContext
+
     func resolveClaudeContext(
         for account: ManagedAccount,
         workingDirectoryURL: URL,
@@ -161,6 +170,10 @@ protocol CodexInstanceLaunching {
         for account: ManagedAccount,
         payload: CodexAuthPayload,
         appSupportDirectoryURL: URL
+    ) throws -> IsolatedCodexLaunchPaths
+
+    func launchIsolatedInstance(
+        context: ResolvedCodexDesktopLaunchContext
     ) throws -> IsolatedCodexLaunchPaths
 }
 

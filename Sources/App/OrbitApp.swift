@@ -26,5 +26,10 @@ struct OrbitApp: App {
             AddAccountSheet(model: model)
                 .frame(minWidth: 620, minHeight: 520)
         }
+
+        Window(L10n.tr("预设启动 Codex"), id: "launch-provider-desktop") {
+            ProviderDesktopLaunchSheet(model: model)
+                .frame(minWidth: 620, minHeight: 460)
+        }
     }
 }

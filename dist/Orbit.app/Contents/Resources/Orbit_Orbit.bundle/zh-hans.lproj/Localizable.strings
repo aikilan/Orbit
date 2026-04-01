@@ -361,6 +361,7 @@
 "Claude tool_result 缺少 tool_use_id。" = "Claude tool_result 缺少 tool_use_id。";
 "打开 Claude Code 前已在线刷新账号 %@ 的凭据。" = "打开 Claude Code 前已在线刷新账号 %@ 的凭据。";
 "打开 Claude Code 前在线刷新账号 %@ 失败，已回退当前本地凭据：%@" = "打开 Claude Code 前在线刷新账号 %@ 失败，已回退当前本地凭据：%@";
+"打开 CLI 会优先使用系统 Claude Code 启动，并自动桥接当前账号的 OpenAI 兼容凭据；仅旧版 Claude Code 会回退到应用生成的 patched runtime。" = "打开 CLI 会优先使用系统 Claude Code 启动，并自动桥接当前账号的 OpenAI 兼容凭据；仅旧版 Claude Code 会回退到应用生成的 patched runtime。";
 "打开 CLI 会启动应用生成的 Claude Code patched runtime；当前账号是 Codex 时，即使环境显示为 Claude 凭据模式，也会直接复用该账号当前的 Codex OAuth 或 API Key 启动，不要求 Claude 登录，也不需要额外填写 Base URL 或 API Key。" = "打开 CLI 会启动应用生成的 Claude Code patched runtime；当前账号是 Codex 时，即使环境显示为 Claude 凭据模式，也会直接复用该账号当前的 Codex OAuth 或 API Key 启动，不要求 Claude 登录，也不需要额外填写 Base URL 或 API Key。";
 "打开 CLI 会启动应用生成的 Claude Code patched runtime；当前账号是 Codex 时，会默认继承该账号的 Codex 环境启动。若来源环境本身使用当前账号凭据，会直接复用当前 Codex OAuth 或 API Key，不要求 Claude 登录，也不需要手动填写 Base URL 或 API Key。" = "打开 CLI 会启动应用生成的 Claude Code patched runtime；当前账号是 Codex 时，会默认继承该账号的 Codex 环境启动。若来源环境本身使用当前账号凭据，会直接复用当前 Codex OAuth 或 API Key，不要求 Claude 登录，也不需要手动填写 Base URL 或 API Key。";
 "当此环境用于 Codex 账号时，应用会自动继承当前账号的 Codex 环境启动 Claude Code，并直接复用当前 Codex OAuth 或 API Key；切到 Claude 账号时，才会沿用 Claude 账号凭据或 Anthropic API Key。" = "当此环境用于 Codex 账号时，应用会自动继承当前账号的 Codex 环境启动 Claude Code，并直接复用当前 Codex OAuth 或 API Key；切到 Claude 账号时，才会沿用 Claude 账号凭据或 Anthropic API Key。";

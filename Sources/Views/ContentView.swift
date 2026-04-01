@@ -210,6 +210,13 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .disabled(!model.canAddAccounts)
 
+            Button {
+                presentProviderDesktopLaunchWindow()
+            } label: {
+                Label(L10n.tr("预设启动 Codex"), systemImage: "bolt.circle.fill")
+            }
+            .buttonStyle(.bordered)
+
             if let homeButtonTitle = model.focusedPlatformHomeButtonTitle {
                 Button {
                     model.openFocusedPlatformHomeInFinder()
@@ -351,6 +358,11 @@ struct ContentView: View {
     private func presentAddAccountWindow() {
         model.prepareAddAccountSheet()
         presentWindow(id: "add-account")
+    }
+
+    private func presentProviderDesktopLaunchWindow() {
+        model.prepareProviderDesktopLaunch()
+        presentWindow(id: "launch-provider-desktop")
     }
 
     private func presentEditProviderWindow(for accountID: UUID) {
@@ -986,7 +998,7 @@ private struct AccountDetailView: View {
             case .claudeCompatible:
                 return L10n.tr("打开 CLI 会按当前账号的 Claude 兼容 provider、模型和 API Key 启动 Claude Code。")
             case .chatgptOAuth, .openAICompatible:
-                return L10n.tr("打开 CLI 会启动应用生成的 Claude Code patched runtime，并自动桥接当前账号的 OpenAI 兼容凭据。")
+                return L10n.tr("打开 CLI 会优先使用系统 Claude Code 启动，并自动桥接当前账号的 OpenAI 兼容凭据；仅旧版 Claude Code 会回退到应用生成的 patched runtime。")
             }
         case .codex:
             if !account.supportsCodexCLI {
@@ -1046,7 +1058,7 @@ private struct AccountDetailView: View {
     }
 
     private var shouldShowIsolatedInstanceAction: Bool {
-        account.providerRule == .chatgptOAuth
+        account.providerRule == .chatgptOAuth || account.providerRule == .openAICompatible
     }
 
     private var isIsolatedInstanceActionDisabled: Bool {
@@ -1095,9 +1107,15 @@ private struct AccountDetailView: View {
 
             if account.platform == .codex {
                 if let snapshot {
-                    HStack(spacing: 10) {
-                        quotaStat(title: L10n.tr("5 小时剩余"), value: snapshot.primary.remainingPercentText)
-                        quotaStat(title: L10n.tr("7 天剩余"), value: snapshot.secondary.remainingPercentText)
+                    if snapshot.fiveHourWindow != nil || snapshot.weeklyWindow != nil {
+                        HStack(spacing: 10) {
+                            if let fiveHourWindow = snapshot.fiveHourWindow {
+                                quotaStat(title: L10n.tr("5 小时剩余"), value: fiveHourWindow.remainingPercentText)
+                            }
+                            if let weeklyWindow = snapshot.weeklyWindow {
+                                quotaStat(title: L10n.tr("7 天剩余"), value: weeklyWindow.remainingPercentText)
+                            }
+                        }
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -1105,8 +1123,18 @@ private struct AccountDetailView: View {
                         inspectorRow(L10n.tr("计划类型"), snapshot.planType ?? L10n.tr("未知"))
                         inspectorRow(L10n.tr("来源"), snapshot.source.displayName)
                         inspectorRow(L10n.tr("采集时间"), snapshot.capturedAt.formatted(date: .abbreviated, time: .standard))
-                        inspectorRow(L10n.tr("5 小时重置"), snapshot.primary.resetsAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知"))
-                        inspectorRow(L10n.tr("7 天重置"), snapshot.secondary.resetsAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知"))
+                        if let fiveHourWindow = snapshot.fiveHourWindow {
+                            inspectorRow(
+                                L10n.tr("5 小时重置"),
+                                fiveHourWindow.resetsAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知")
+                            )
+                        }
+                        if let weeklyWindow = snapshot.weeklyWindow {
+                            inspectorRow(
+                                L10n.tr("7 天重置"),
+                                weeklyWindow.resetsAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知")
+                            )
+                        }
 
                         if let credits = snapshot.credits {
                             inspectorRow(L10n.tr("Credits"), credits.unlimited ? L10n.tr("unlimited") : (credits.balance.map { "\($0)" } ?? L10n.tr("无")))

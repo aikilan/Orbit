@@ -37,6 +37,12 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
         let availableModels: [String]?
     }
 
+    private struct ResolvedCodexProviderEnvironment {
+        let modelCatalogSnapshot: ResolvedCodexModelCatalogSnapshot?
+        let configFileContents: String
+        let environmentVariables: [String: String]
+    }
+
     private let fileManager: FileManager
     private let session: URLSession
 
@@ -93,37 +99,11 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
             guard let credential = providerAPIKeyCredential else {
                 throw CLIEnvironmentResolverError.missingProviderCredential
             }
-            let provider = try resolvedProviderConfig(for: account)
-            let shouldManageModelCatalog = shouldManageCodexModelCatalog(for: account)
-            let availableModels = shouldManageModelCatalog || !account.supportsResponsesAPI
-                ? await availableModelsForBridge(
-                    account: account,
-                    providerBaseURL: provider.baseURL,
-                    apiKey: credential.apiKey
-                )
-                : []
-            let resolvedProvider: (baseURL: String, apiKeyEnvName: String, apiKey: String)
-            if account.supportsResponsesAPI {
-                resolvedProvider = (
-                    baseURL: provider.baseURL,
-                    apiKeyEnvName: provider.apiKeyEnvName,
-                    apiKey: credential.apiKey
-                )
-            } else {
-                let bridge = try await openAICompatibleProviderCodexBridgeManager.prepareBridge(
-                    accountID: account.id,
-                    baseURL: provider.baseURL,
-                    apiKeyEnvName: provider.apiKeyEnvName,
-                    apiKey: credential.apiKey,
-                    model: account.resolvedDefaultModel,
-                    availableModels: availableModels
-                )
-                resolvedProvider = (
-                    baseURL: bridge.baseURL,
-                    apiKeyEnvName: bridge.apiKeyEnvName,
-                    apiKey: bridge.apiKey
-                )
-            }
+            let resolvedEnvironment = try await resolveOpenAICompatibleCodexEnvironment(
+                for: account,
+                credential: credential,
+                openAICompatibleProviderCodexBridgeManager: openAICompatibleProviderCodexBridgeManager
+            )
             let codexHomeURL = isolatedCodexHomeURL(
                 for: account.id,
                 target: .codex,
@@ -135,18 +115,9 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 mode: .isolated,
                 codexHomeURL: codexHomeURL,
                 authPayload: nil,
-                modelCatalogSnapshot: shouldManageModelCatalog
-                    ? ResolvedCodexModelCatalogSnapshot(availableModels: availableModels)
-                    : nil,
-                configFileContents: codexConfigContents(
-                    model: account.resolvedDefaultModel,
-                    modelProvider: provider.identifier,
-                    providerIdentifier: provider.identifier,
-                    providerDisplayName: provider.displayName,
-                    baseURL: resolvedProvider.baseURL,
-                    envKey: resolvedProvider.apiKeyEnvName
-                ),
-                environmentVariables: [resolvedProvider.apiKeyEnvName: resolvedProvider.apiKey],
+                modelCatalogSnapshot: resolvedEnvironment.modelCatalogSnapshot,
+                configFileContents: resolvedEnvironment.configFileContents,
+                environmentVariables: resolvedEnvironment.environmentVariables,
                 arguments: []
             )
         case .claudeCompatible:
@@ -156,19 +127,10 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
             guard let credential = providerAPIKeyCredential else {
                 throw CLIEnvironmentResolverError.missingProviderCredential
             }
-            let provider = try resolvedProviderConfig(for: account)
-            let availableModels = await availableModelsForBridge(
-                account: account,
-                providerBaseURL: provider.baseURL,
-                apiKey: credential.apiKey
-            )
-            let bridge = try await claudeProviderCodexBridgeManager.prepareBridge(
-                accountID: account.id,
-                baseURL: provider.baseURL,
-                apiKeyEnvName: provider.apiKeyEnvName,
-                apiKey: credential.apiKey,
-                model: account.resolvedDefaultModel,
-                availableModels: availableModels
+            let resolvedEnvironment = try await resolveClaudeCompatibleCodexEnvironment(
+                for: account,
+                credential: credential,
+                claudeProviderCodexBridgeManager: claudeProviderCodexBridgeManager
             )
             let codexHomeURL = isolatedCodexHomeURL(
                 for: account.id,
@@ -181,17 +143,78 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 mode: .isolated,
                 codexHomeURL: codexHomeURL,
                 authPayload: nil,
-                modelCatalogSnapshot: ResolvedCodexModelCatalogSnapshot(availableModels: availableModels),
-                configFileContents: codexConfigContents(
-                    model: account.resolvedDefaultModel,
-                    modelProvider: provider.identifier,
-                    providerIdentifier: provider.identifier,
-                    providerDisplayName: provider.displayName,
-                    baseURL: bridge.baseURL,
-                    envKey: bridge.apiKeyEnvName
-                ),
-                environmentVariables: [bridge.apiKeyEnvName: bridge.apiKey],
+                modelCatalogSnapshot: resolvedEnvironment.modelCatalogSnapshot,
+                configFileContents: resolvedEnvironment.configFileContents,
+                environmentVariables: resolvedEnvironment.environmentVariables,
                 arguments: []
+            )
+        case .claudeProfile:
+            throw CLIEnvironmentResolverError.codexCLINotSupported
+        }
+    }
+
+    func resolveCodexDesktopContext(
+        for account: ManagedAccount,
+        appPaths: AppPaths,
+        authPayload: CodexAuthPayload?,
+        providerAPIKeyCredential: ProviderAPIKeyCredential?,
+        openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging,
+        claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging
+    ) async throws -> ResolvedCodexDesktopLaunchContext {
+        let codexHomeURL = isolatedCodexDesktopHomeURL(
+            for: account.id,
+            appSupportDirectoryURL: appPaths.appSupportDirectoryURL
+        )
+
+        switch account.providerRule {
+        case .chatgptOAuth:
+            guard let authPayload else {
+                throw CLIEnvironmentResolverError.missingCodexPayload
+            }
+            return ResolvedCodexDesktopLaunchContext(
+                accountID: account.id,
+                codexHomeURL: codexHomeURL,
+                authPayload: authPayload,
+                modelCatalogSnapshot: nil,
+                configFileContents: nil,
+                environmentVariables: [:]
+            )
+        case .openAICompatible:
+            guard let credential = providerAPIKeyCredential else {
+                throw CLIEnvironmentResolverError.missingProviderCredential
+            }
+            let resolvedEnvironment = try await resolveOpenAICompatibleCodexEnvironment(
+                for: account,
+                credential: credential,
+                openAICompatibleProviderCodexBridgeManager: openAICompatibleProviderCodexBridgeManager
+            )
+            return ResolvedCodexDesktopLaunchContext(
+                accountID: account.id,
+                codexHomeURL: codexHomeURL,
+                authPayload: nil,
+                modelCatalogSnapshot: resolvedEnvironment.modelCatalogSnapshot,
+                configFileContents: resolvedEnvironment.configFileContents,
+                environmentVariables: resolvedEnvironment.environmentVariables
+            )
+        case .claudeCompatible:
+            guard account.supportsCodexCLI else {
+                throw CLIEnvironmentResolverError.codexCLINotSupported
+            }
+            guard let credential = providerAPIKeyCredential else {
+                throw CLIEnvironmentResolverError.missingProviderCredential
+            }
+            let resolvedEnvironment = try await resolveClaudeCompatibleCodexEnvironment(
+                for: account,
+                credential: credential,
+                claudeProviderCodexBridgeManager: claudeProviderCodexBridgeManager
+            )
+            return ResolvedCodexDesktopLaunchContext(
+                accountID: account.id,
+                codexHomeURL: codexHomeURL,
+                authPayload: nil,
+                modelCatalogSnapshot: resolvedEnvironment.modelCatalogSnapshot,
+                configFileContents: resolvedEnvironment.configFileContents,
+                environmentVariables: resolvedEnvironment.environmentVariables
             )
         case .claudeProfile:
             throw CLIEnvironmentResolverError.codexCLINotSupported
@@ -220,7 +243,7 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 workingDirectoryURL: workingDirectoryURL,
                 rootURL: rootURL,
                 configDirectoryURL: rootURL?.appendingPathComponent(".claude", isDirectory: true),
-                patchedExecutableURL: nil,
+                executableOverrideURL: nil,
                 providerSnapshot: nil,
                 environmentVariables: [:],
                 arguments: []
@@ -255,7 +278,7 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
                 workingDirectoryURL: workingDirectoryURL,
                 rootURL: rootURL,
                 configDirectoryURL: rootURL.appendingPathComponent(".claude", isDirectory: true),
-                patchedExecutableURL: try claudePatchedRuntimeManager.preparePatchedRuntime(
+                executableOverrideURL: try claudePatchedRuntimeManager.resolveExecutableOverride(
                     model: resolvedProvider.model,
                     appSupportDirectoryURL: appPaths.appSupportDirectoryURL
                 ),
@@ -353,7 +376,7 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
             workingDirectoryURL: workingDirectoryURL,
             rootURL: rootURL,
             configDirectoryURL: rootURL.appendingPathComponent(".claude", isDirectory: true),
-            patchedExecutableURL: try claudePatchedRuntimeManager.preparePatchedRuntime(
+            executableOverrideURL: try claudePatchedRuntimeManager.resolveExecutableOverride(
                 model: provider.model,
                 appSupportDirectoryURL: appPaths.appSupportDirectoryURL
             ),
@@ -367,6 +390,94 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
             ),
             environmentVariables: claudeProviderEnvironmentVariables(for: provider),
             arguments: ["--model", provider.model]
+        )
+    }
+
+    private func resolveOpenAICompatibleCodexEnvironment(
+        for account: ManagedAccount,
+        credential: ProviderAPIKeyCredential,
+        openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging
+    ) async throws -> ResolvedCodexProviderEnvironment {
+        let provider = try resolvedProviderConfig(for: account)
+        let shouldManageModelCatalog = shouldManageCodexModelCatalog(for: account)
+        let availableModels = shouldManageModelCatalog || !account.supportsResponsesAPI
+            ? await availableModelsForBridge(
+                account: account,
+                providerBaseURL: provider.baseURL,
+                apiKey: credential.apiKey
+            )
+            : []
+
+        let resolvedProvider: (baseURL: String, apiKeyEnvName: String, apiKey: String)
+        if account.supportsResponsesAPI {
+            resolvedProvider = (
+                baseURL: provider.baseURL,
+                apiKeyEnvName: provider.apiKeyEnvName,
+                apiKey: credential.apiKey
+            )
+        } else {
+            let bridge = try await openAICompatibleProviderCodexBridgeManager.prepareBridge(
+                accountID: account.id,
+                baseURL: provider.baseURL,
+                apiKeyEnvName: provider.apiKeyEnvName,
+                apiKey: credential.apiKey,
+                model: account.resolvedDefaultModel,
+                availableModels: availableModels
+            )
+            resolvedProvider = (
+                baseURL: bridge.baseURL,
+                apiKeyEnvName: bridge.apiKeyEnvName,
+                apiKey: bridge.apiKey
+            )
+        }
+
+        return ResolvedCodexProviderEnvironment(
+            modelCatalogSnapshot: shouldManageModelCatalog
+                ? ResolvedCodexModelCatalogSnapshot(availableModels: availableModels)
+                : nil,
+            configFileContents: codexConfigContents(
+                model: account.resolvedDefaultModel,
+                modelProvider: provider.identifier,
+                providerIdentifier: provider.identifier,
+                providerDisplayName: provider.displayName,
+                baseURL: resolvedProvider.baseURL,
+                envKey: resolvedProvider.apiKeyEnvName
+            ),
+            environmentVariables: [resolvedProvider.apiKeyEnvName: resolvedProvider.apiKey]
+        )
+    }
+
+    private func resolveClaudeCompatibleCodexEnvironment(
+        for account: ManagedAccount,
+        credential: ProviderAPIKeyCredential,
+        claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging
+    ) async throws -> ResolvedCodexProviderEnvironment {
+        let provider = try resolvedProviderConfig(for: account)
+        let availableModels = await availableModelsForBridge(
+            account: account,
+            providerBaseURL: provider.baseURL,
+            apiKey: credential.apiKey
+        )
+        let bridge = try await claudeProviderCodexBridgeManager.prepareBridge(
+            accountID: account.id,
+            baseURL: provider.baseURL,
+            apiKeyEnvName: provider.apiKeyEnvName,
+            apiKey: credential.apiKey,
+            model: account.resolvedDefaultModel,
+            availableModels: availableModels
+        )
+
+        return ResolvedCodexProviderEnvironment(
+            modelCatalogSnapshot: ResolvedCodexModelCatalogSnapshot(availableModels: availableModels),
+            configFileContents: codexConfigContents(
+                model: account.resolvedDefaultModel,
+                modelProvider: provider.identifier,
+                providerIdentifier: provider.identifier,
+                providerDisplayName: provider.displayName,
+                baseURL: bridge.baseURL,
+                envKey: bridge.apiKeyEnvName
+            ),
+            environmentVariables: [bridge.apiKeyEnvName: bridge.apiKey]
         )
     }
 
@@ -645,6 +756,16 @@ struct CLIEnvironmentResolver: @unchecked Sendable {
         appSupportDirectoryURL
             .appendingPathComponent("account-cli", isDirectory: true)
             .appendingPathComponent(target.rawValue, isDirectory: true)
+            .appendingPathComponent(accountID.uuidString, isDirectory: true)
+            .appendingPathComponent("codex-home", isDirectory: true)
+    }
+
+    private func isolatedCodexDesktopHomeURL(
+        for accountID: UUID,
+        appSupportDirectoryURL: URL
+    ) -> URL {
+        appSupportDirectoryURL
+            .appendingPathComponent("isolated-codex-instances", isDirectory: true)
             .appendingPathComponent(accountID.uuidString, isDirectory: true)
             .appendingPathComponent("codex-home", isDirectory: true)
     }

@@ -157,7 +157,7 @@ final class AppViewModelTests: XCTestCase {
         let refreshedAccount = try XCTUnwrap(harness.model.accounts.first)
         let snapshot = try XCTUnwrap(harness.model.snapshot(for: accountID))
         XCTAssertEqual(snapshot.primary.remainingPercentText, "100%")
-        XCTAssertEqual(snapshot.secondary.remainingPercentText, "68%")
+        XCTAssertEqual(try XCTUnwrap(snapshot.secondary).remainingPercentText, "68%")
         XCTAssertEqual(
             refreshedAccount.lastStatusMessage,
             L10n.tr("状态与额度已更新：剩余 %@。", L10n.tr("5h %@ / 7d %@", "100%", "68%"))
@@ -1269,7 +1269,7 @@ final class AppViewModelTests: XCTestCase {
         )
         XCTAssertEqual(bridgeSnapshot.lastModel, "gpt-5.4")
         XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
-        XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
+        XCTAssertNil(claudeCLILauncher.lastContext?.executableOverrideURL)
         XCTAssertEqual(
             claudeCLILauncher.lastContext?.providerSnapshot,
             ResolvedClaudeProviderSnapshot(
@@ -1408,7 +1408,7 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(bridgeSnapshot.lastModel, "kimi-k2-0711-preview")
         XCTAssertEqual(bridgeSnapshot.lastAvailableModels, ["kimi-k2-0711-preview"])
         XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
-        XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
+        XCTAssertNil(claudeCLILauncher.lastContext?.executableOverrideURL)
         XCTAssertEqual(claudeCLILauncher.lastContext?.providerSnapshot?.availableModels, ["kimi-k2-0711-preview"])
     }
 
@@ -1473,7 +1473,7 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(bridgeSnapshot.lastModel, "MiniMax-M2.7")
         XCTAssertEqual(bridgeSnapshot.lastAvailableModels, ["MiniMax-M2.7"])
         XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
-        XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
+        XCTAssertNil(claudeCLILauncher.lastContext?.executableOverrideURL)
         XCTAssertEqual(claudeCLILauncher.lastContext?.providerSnapshot?.availableModels, ["MiniMax-M2.7"])
     }
 
@@ -1586,7 +1586,7 @@ final class AppViewModelTests: XCTestCase {
         )
 
         XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
-        XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
+        XCTAssertNil(claudeCLILauncher.lastContext?.executableOverrideURL)
         XCTAssertEqual(
             claudeCLILauncher.lastContext?.providerSnapshot,
             ResolvedClaudeProviderSnapshot(
@@ -1646,7 +1646,7 @@ final class AppViewModelTests: XCTestCase {
         await harness.model.openCLI(for: account, workingDirectoryURL: makeWorkingDirectoryURL("claude-direct"))
 
         XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
-        XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
+        XCTAssertNil(claudeCLILauncher.lastContext?.executableOverrideURL)
         XCTAssertEqual(
             claudeCLILauncher.lastContext?.providerSnapshot,
             ResolvedClaudeProviderSnapshot(
@@ -1670,6 +1670,7 @@ final class AppViewModelTests: XCTestCase {
         authFileManager.currentAuth = cachedPayload
         let claudeCLILauncher = RecordingClaudeCLILauncher()
         let patchedRuntimeManager = RecordingClaudePatchedRuntimeManager()
+        patchedRuntimeManager.executableOverrideURL = patchedRuntimeManager.runtimeURL
         let bridgeManager = RecordingCodexOAuthClaudeBridgeManager()
 
         let harness = try await makeHarness(
@@ -1710,7 +1711,7 @@ final class AppViewModelTests: XCTestCase {
             ]
         )
         XCTAssertEqual(claudeCLILauncher.launchCallCount, 1)
-        XCTAssertEqual(claudeCLILauncher.lastContext?.patchedExecutableURL, patchedRuntimeManager.runtimeURL)
+        XCTAssertEqual(claudeCLILauncher.lastContext?.executableOverrideURL, patchedRuntimeManager.runtimeURL)
         XCTAssertEqual(claudeCLILauncher.lastContext?.providerSnapshot?.source, .inheritCodexEnvironment)
         XCTAssertEqual(claudeCLILauncher.lastContext?.providerSnapshot?.model, "gpt-5.4")
         XCTAssertEqual(
@@ -2301,7 +2302,7 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertFalse(harness.model.isLaunchingIsolatedInstance(for: account.id))
     }
 
-    func testLaunchIsolatedCodexDoesNotSupportActiveProviderAccount() async throws {
+    func testLaunchIsolatedCodexSupportsActiveProviderAccount() async throws {
         let accountID = UUID()
         let cachedPayload = try makeAPIKeyPayload("sk-test-old")
         let launcher = RecordingCodexInstanceLauncher()
@@ -2320,14 +2321,93 @@ final class AppViewModelTests: XCTestCase {
         let account = try XCTUnwrap(harness.model.accounts.first)
 
         XCTAssertTrue(account.isActive)
-        XCTAssertFalse(harness.model.canLaunchIsolatedCodex(for: account))
+        XCTAssertTrue(harness.model.canLaunchIsolatedCodex(for: account))
 
         await harness.model.launchIsolatedCodex(for: account)
 
-        XCTAssertEqual(launcher.launchCallCount, 0)
+        XCTAssertEqual(launcher.launchCallCount, 1)
         XCTAssertNil(launcher.lastPayload)
-        XCTAssertFalse(harness.model.hasLaunchedIsolatedInstance(for: account.id))
+        XCTAssertEqual(launcher.lastContext?.environmentVariables["OPENAI_API_KEY"], "sk-test-old")
+        XCTAssertTrue(launcher.lastContext?.configFileContents?.contains("model_provider = \"openai\"") == true)
+        XCTAssertTrue(harness.model.hasLaunchedIsolatedInstance(for: account.id))
         XCTAssertFalse(harness.model.isLaunchingIsolatedInstance(for: account.id))
+    }
+
+    func testStartProviderDesktopLaunchValidatesRequiredFields() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified)
+        )
+
+        await harness.model.prepare()
+        harness.model.prepareProviderDesktopLaunch()
+        harness.model.desktopLaunchDefaultModel = "deepseek-chat"
+
+        let missingKey = await harness.model.startProviderDesktopLaunch()
+        XCTAssertFalse(missingKey)
+        XCTAssertEqual(harness.model.desktopLaunchError, L10n.tr("请输入 API Key。"))
+
+        harness.model.desktopLaunchAPIKeyInput = "sk-test"
+        harness.model.desktopLaunchDefaultModel = ""
+
+        let missingModel = await harness.model.startProviderDesktopLaunch()
+        XCTAssertFalse(missingModel)
+        XCTAssertEqual(harness.model.desktopLaunchError, L10n.tr("请输入默认模型。"))
+    }
+
+    func testStartProviderDesktopLaunchSavesAccountAndLaunchesDesktopContext() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let launcher = RecordingCodexInstanceLauncher()
+        let resolver = RecordingDesktopCLIEnvironmentResolver()
+        let authFileManager = RecordingAuthFileManager()
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: authFileManager,
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            instanceLauncher: launcher,
+            cliEnvironmentResolver: resolver
+        )
+
+        await harness.model.prepare()
+        harness.model.prepareProviderDesktopLaunch()
+        harness.model.desktopLaunchPresetID = "deepseek"
+        harness.model.applyDesktopLaunchPreset(ProviderCatalog.preset(id: "deepseek"))
+        harness.model.desktopLaunchDisplayName = "DeepSeek Work"
+        harness.model.desktopLaunchDefaultModel = "deepseek-chat"
+        harness.model.desktopLaunchAPIKeyInput = "sk-deepseek"
+
+        let didLaunch = await harness.model.startProviderDesktopLaunch()
+
+        XCTAssertTrue(didLaunch)
+        XCTAssertEqual(launcher.launchCallCount, 1)
+        XCTAssertNil(launcher.lastPayload)
+        XCTAssertEqual(launcher.lastContext?.environmentVariables["DEEPSEEK_API_KEY"], "sk-deepseek")
+        XCTAssertEqual(launcher.lastContext?.configFileContents, "desktop-config")
+        XCTAssertEqual(launcher.lastContext?.modelCatalogSnapshot, ResolvedCodexModelCatalogSnapshot(availableModels: ["deepseek-chat"]))
+        XCTAssertTrue(authFileManager.activatedPayloads.isEmpty)
+
+        let savedAccount = try XCTUnwrap(
+            harness.model.accounts.first(where: {
+                $0.providerRule == .openAICompatible && $0.providerPresetID == "deepseek"
+            })
+        )
+        XCTAssertEqual(savedAccount.displayName, "DeepSeek Work")
+        XCTAssertEqual(savedAccount.defaultModel, "deepseek-chat")
+        XCTAssertEqual(savedAccount.providerBaseURL, ProviderCatalog.preset(id: "deepseek")?.baseURL)
+        XCTAssertEqual(savedAccount.providerAPIKeyEnvName, ProviderCatalog.preset(id: "deepseek")?.apiKeyEnvName)
+        XCTAssertEqual(harness.model.activeAccount?.id, savedAccount.id)
+        XCTAssertEqual(harness.model.selectedAccount?.id, savedAccount.id)
+        XCTAssertEqual(try harness.credentialStore.load(for: savedAccount.id).providerAPIKeyCredential?.apiKey, "sk-deepseek")
+        XCTAssertEqual(harness.model.banner?.message, L10n.tr("已保存账号 %@，并启动独立 Codex 实例。", "DeepSeek Work"))
     }
 
     func testLaunchIsolatedCodexRefreshesChatGPTPayloadBeforeLaunching() async throws {
@@ -2685,6 +2765,7 @@ final class AppViewModelTests: XCTestCase {
         quotaMonitor: any QuotaMonitoring = NoopQuotaMonitor(),
         userNotifier: any UserNotifying = RecordingUserNotifier(),
         instanceLauncher: any CodexInstanceLaunching = RecordingCodexInstanceLauncher(),
+        cliEnvironmentResolver: any CLIEnvironmentResolving = CLIEnvironmentResolver(),
         cliLauncher: any CodexCLILaunching = RecordingCodexCLILauncher(),
         claudeCLILauncher: any ClaudeCLILaunching = RecordingClaudeCLILauncher(),
         claudePatchedRuntimeManager: any ClaudePatchedRuntimeManaging = RecordingClaudePatchedRuntimeManager(),
@@ -2788,6 +2869,7 @@ final class AppViewModelTests: XCTestCase {
             userNotifier: userNotifier,
             runtimeInspector: runtimeInspector,
             instanceLauncher: instanceLauncher,
+            cliEnvironmentResolver: cliEnvironmentResolver,
             cliLauncher: cliLauncher,
             claudeCLILauncher: claudeCLILauncher,
             claudePatchedRuntimeManager: claudePatchedRuntimeManager,
@@ -3079,10 +3161,59 @@ private final class MockRuntimeInspector: @unchecked Sendable, CodexRuntimeInspe
     }
 }
 
+private final class RecordingDesktopCLIEnvironmentResolver: CLIEnvironmentResolving {
+    func resolveCodexContext(
+        for account: ManagedAccount,
+        workingDirectoryURL: URL,
+        appPaths: AppPaths,
+        authPayload: CodexAuthPayload?,
+        providerAPIKeyCredential: ProviderAPIKeyCredential?,
+        openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging,
+        claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging
+    ) async throws -> ResolvedCodexCLILaunchContext {
+        throw MockError.unused
+    }
+
+    func resolveCodexDesktopContext(
+        for account: ManagedAccount,
+        appPaths: AppPaths,
+        authPayload: CodexAuthPayload?,
+        providerAPIKeyCredential: ProviderAPIKeyCredential?,
+        openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging,
+        claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging
+    ) async throws -> ResolvedCodexDesktopLaunchContext {
+        return ResolvedCodexDesktopLaunchContext(
+            accountID: account.id,
+            codexHomeURL: appPaths.appSupportDirectoryURL
+                .appendingPathComponent("isolated-codex-instances", isDirectory: true)
+                .appendingPathComponent(account.id.uuidString, isDirectory: true)
+                .appendingPathComponent("codex-home", isDirectory: true),
+            authPayload: authPayload,
+            modelCatalogSnapshot: ResolvedCodexModelCatalogSnapshot(availableModels: [account.resolvedDefaultModel]),
+            configFileContents: "desktop-config",
+            environmentVariables: [account.resolvedProviderAPIKeyEnvName: providerAPIKeyCredential?.apiKey ?? ""]
+        )
+    }
+
+    func resolveClaudeContext(
+        for account: ManagedAccount,
+        workingDirectoryURL: URL,
+        appPaths: AppPaths,
+        codexAuthPayload: CodexAuthPayload?,
+        credential: StoredCredential?,
+        claudeProfileManager: any ClaudeProfileManaging,
+        claudePatchedRuntimeManager: any ClaudePatchedRuntimeManaging,
+        codexOAuthClaudeBridgeManager: any CodexOAuthClaudeBridgeManaging
+    ) async throws -> ResolvedClaudeCLILaunchContext {
+        throw MockError.unused
+    }
+}
+
 private final class RecordingCodexInstanceLauncher: CodexInstanceLaunching {
     var launchCallCount = 0
     var lastAccountID: UUID?
     var lastPayload: CodexAuthPayload?
+    var lastContext: ResolvedCodexDesktopLaunchContext?
     var lastAppSupportDirectoryURL: URL?
 
     func launchIsolatedInstance(
@@ -3098,6 +3229,21 @@ private final class RecordingCodexInstanceLauncher: CodexInstanceLaunching {
             rootDirectoryURL: appSupportDirectoryURL.appendingPathComponent("isolated-codex-instances").appendingPathComponent(account.id.uuidString),
             codexHomeURL: appSupportDirectoryURL.appendingPathComponent("isolated-codex-instances").appendingPathComponent(account.id.uuidString).appendingPathComponent("codex-home"),
             userDataURL: appSupportDirectoryURL.appendingPathComponent("isolated-codex-instances").appendingPathComponent(account.id.uuidString).appendingPathComponent("user-data")
+        )
+    }
+
+    func launchIsolatedInstance(
+        context: ResolvedCodexDesktopLaunchContext
+    ) throws -> IsolatedCodexLaunchPaths {
+        launchCallCount += 1
+        lastAccountID = context.accountID
+        lastPayload = context.authPayload
+        lastContext = context
+        let rootDirectoryURL = context.codexHomeURL.deletingLastPathComponent()
+        return IsolatedCodexLaunchPaths(
+            rootDirectoryURL: rootDirectoryURL,
+            codexHomeURL: context.codexHomeURL,
+            userDataURL: rootDirectoryURL.appendingPathComponent("user-data")
         )
     }
 }
@@ -3131,17 +3277,18 @@ private final class RecordingClaudeCLILauncher: ClaudeCLILaunching {
 }
 
 private final class RecordingClaudePatchedRuntimeManager: @unchecked Sendable, ClaudePatchedRuntimeManaging {
-    var prepareCallCount = 0
+    var resolveCallCount = 0
     var lastModel: String?
+    var executableOverrideURL: URL?
     var runtimeURL = FileManager.default.temporaryDirectory
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
         .appendingPathComponent("bin", isDirectory: true)
         .appendingPathComponent("claude", isDirectory: false)
 
-    func preparePatchedRuntime(model: String, appSupportDirectoryURL: URL) throws -> URL {
-        prepareCallCount += 1
+    func resolveExecutableOverride(model: String, appSupportDirectoryURL: URL) throws -> URL? {
+        resolveCallCount += 1
         lastModel = model
-        return runtimeURL
+        return executableOverrideURL
     }
 }
 

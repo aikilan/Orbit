@@ -137,12 +137,74 @@ final class OAuthClientTests: XCTestCase {
         XCTAssertFalse(result.limitReached)
         XCTAssertEqual(Int(result.snapshot.primary.usedPercent), 12)
         XCTAssertEqual(result.snapshot.primary.windowMinutes, 300)
-        XCTAssertEqual(Int(result.snapshot.secondary.usedPercent), 34)
-        XCTAssertEqual(result.snapshot.secondary.windowMinutes, 10080)
+        XCTAssertEqual(Int(try XCTUnwrap(result.snapshot.secondary).usedPercent), 34)
+        XCTAssertEqual(try XCTUnwrap(result.snapshot.secondary).windowMinutes, 10080)
         XCTAssertEqual(result.snapshot.source, .onlineUsageRefresh)
         XCTAssertEqual(result.snapshot.credits?.balance, 9.5)
         XCTAssertEqual(result.subscriptionDetails?.allowed, true)
         XCTAssertEqual(result.subscriptionDetails?.limitReached, false)
+    }
+
+    func testFetchUsageSnapshotParsesPersonalAccountResponseWithFlexibleFieldTypes() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://chatgpt.com/backend-api/wham/usage")
+
+            let responseBody = """
+            {
+              "email": "personal@example.com",
+              "plan_type": "plus",
+              "rate_limit": {
+                "allowed": 1,
+                "limit_reached": "false",
+                "primary_window": {
+                  "used_percent": "18",
+                  "limit_window_seconds": "18000",
+                  "reset_at": "1773908626"
+                }
+              },
+              "credits": {
+                "has_credits": "true",
+                "unlimited": 0,
+                "balance": "9.5"
+              }
+            }
+            """
+
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, Data(responseBody.utf8))
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = OAuthClient(session: session)
+
+        let result = try await client.fetchUsageSnapshot(using: CodexAuthPayload(
+            tokens: CodexTokenBundle(
+                idToken: Self.makeUnsignedJWT(claims: [
+                    "https://api.openai.com/auth": ["chatgpt_account_id": "acct_personal"],
+                ]),
+                accessToken: "access_personal",
+                refreshToken: "refresh_personal",
+                accountID: "acct_personal"
+            ),
+            lastRefresh: CodexDateCoding.string(from: Date())
+        ))
+
+        XCTAssertEqual(result.email, "personal@example.com")
+        XCTAssertEqual(result.planType, "plus")
+        XCTAssertTrue(result.allowed)
+        XCTAssertFalse(result.limitReached)
+        XCTAssertEqual(Int(result.snapshot.primary.usedPercent), 18)
+        XCTAssertEqual(result.snapshot.primary.windowMinutes, 300)
+        XCTAssertNil(result.snapshot.secondary)
+        XCTAssertEqual(result.snapshot.remainingSummary, L10n.tr("5h %@", "82%"))
+        XCTAssertEqual(result.snapshot.credits?.balance, 9.5)
     }
 
     override func tearDown() {

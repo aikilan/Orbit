@@ -51,7 +51,7 @@ extension QuotaSnapshotSource {
 
 struct QuotaSnapshot: Codable, Hashable, Sendable {
     var primary: RateLimitWindowSnapshot
-    var secondary: RateLimitWindowSnapshot
+    var secondary: RateLimitWindowSnapshot?
     var credits: CreditsSnapshot?
     var planType: String?
     var capturedAt: Date
@@ -59,7 +59,45 @@ struct QuotaSnapshot: Codable, Hashable, Sendable {
 }
 
 extension QuotaSnapshot {
+    var fiveHourWindow: RateLimitWindowSnapshot? {
+        closestWindow(targetMinutes: 300) { $0.windowMinutes < 1440 }
+    }
+
+    var weeklyWindow: RateLimitWindowSnapshot? {
+        closestWindow(targetMinutes: 10080) { $0.windowMinutes >= 1440 }
+    }
+
     var remainingSummary: String {
-        L10n.tr("5h %@ / 7d %@", primary.remainingPercentText, secondary.remainingPercentText)
+        if let fiveHourWindow, let weeklyWindow {
+            return L10n.tr("5h %@ / 7d %@", fiveHourWindow.remainingPercentText, weeklyWindow.remainingPercentText)
+        }
+        if let fiveHourWindow {
+            return L10n.tr("5h %@", fiveHourWindow.remainingPercentText)
+        }
+        if let weeklyWindow {
+            return L10n.tr("7d %@", weeklyWindow.remainingPercentText)
+        }
+        return primary.remainingPercentText
+    }
+
+    private func closestWindow(
+        targetMinutes: Int,
+        where predicate: (RateLimitWindowSnapshot) -> Bool
+    ) -> RateLimitWindowSnapshot? {
+        let windows = [primary, secondary].compactMap { $0 }.filter(predicate)
+        guard let firstWindow = windows.first else { return nil }
+
+        return windows.dropFirst().reduce(firstWindow) { currentBest, candidate in
+            let currentDistance = abs(currentBest.windowMinutes - targetMinutes)
+            let candidateDistance = abs(candidate.windowMinutes - targetMinutes)
+
+            if candidateDistance < currentDistance {
+                return candidate
+            }
+            if candidateDistance > currentDistance {
+                return currentBest
+            }
+            return candidate.windowMinutes > currentBest.windowMinutes ? candidate : currentBest
+        }
     }
 }

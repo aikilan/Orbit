@@ -39,19 +39,46 @@ struct ClaudePatchedRuntimeManager: @unchecked Sendable {
         self.resolveClaudeExecutableURL = resolveClaudeExecutableURL
     }
 
-    func preparePatchedRuntime(
+    func resolveExecutableOverride(
         model: String,
         appSupportDirectoryURL: URL
-    ) throws -> URL {
+    ) throws -> URL? {
         let normalizedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedModel.isEmpty else {
             throw ClaudePatchedRuntimeManagerError.patchFailed(L10n.tr("缺少模型配置。"))
         }
 
         let installation = try sourceInstallation()
+        let originalCLIURL = installation.packageRootURL.appendingPathComponent("cli.js", isDirectory: false)
+        let originalCLIContents = try String(contentsOf: originalCLIURL, encoding: .utf8)
+
+        if supportsNativeLaunch(in: originalCLIContents) {
+            return nil
+        }
+
+        do {
+            return try prepareLegacyPatchedRuntime(
+                installation: installation,
+                model: normalizedModel,
+                originalCLIContents: originalCLIContents,
+                appSupportDirectoryURL: appSupportDirectoryURL
+            )
+        } catch let ClaudePatchedRuntimeManagerError.patchFailed(reason) {
+            throw ClaudePatchedRuntimeManagerError.patchFailed(
+                L10n.tr("检测到 Claude Code %@，%@", installation.version, reason)
+            )
+        }
+    }
+
+    private func prepareLegacyPatchedRuntime(
+        installation: SourceInstallation,
+        model: String,
+        originalCLIContents: String,
+        appSupportDirectoryURL: URL
+    ) throws -> URL {
         let runtimeRootURL = patchedRuntimeRootURL(
             for: installation,
-            model: normalizedModel,
+            model: model,
             appSupportDirectoryURL: appSupportDirectoryURL
         )
         let wrapperURL = runtimeRootURL
@@ -81,8 +108,7 @@ struct ClaudePatchedRuntimeManager: @unchecked Sendable {
         try fileManager.createDirectory(at: runtimeRootURL, withIntermediateDirectories: true)
         try fileManager.copyItem(at: installation.packageRootURL, to: packageDestinationURL)
 
-        let originalCLIContents = try String(contentsOf: patchedCLIURL, encoding: .utf8)
-        let patchedCLIContents = try patchCLIContents(originalCLIContents, model: normalizedModel)
+        let patchedCLIContents = try patchCLIContents(originalCLIContents)
         try patchedCLIContents.write(to: patchedCLIURL, atomically: true, encoding: .utf8)
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: patchedCLIURL.path)
 
@@ -92,6 +118,30 @@ struct ClaudePatchedRuntimeManager: @unchecked Sendable {
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapperURL.path)
 
         return wrapperURL
+    }
+
+    private func supportsNativeLaunch(in contents: String) -> Bool {
+        guard contents.contains("ANTHROPIC_CUSTOM_MODEL_OPTION"),
+              contents.contains("CLAUDE_CODE_SUBAGENT_MODEL")
+        else {
+            return false
+        }
+
+        return containsMatch(
+            pattern: #"process\.env\.ANTHROPIC_CUSTOM_MODEL_OPTION[\s\S]{0,600}process\.env\.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME\?\?[\s\S]{0,600}process\.env\.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION\?\?"#,
+            in: contents
+        ) && containsMatch(
+            pattern: #"process\.env\.ANTHROPIC_CUSTOM_MODEL_OPTION\)return\{valid:!0\}"#,
+            in: contents
+        )
+    }
+
+    private func containsMatch(pattern: String, in contents: String) -> Bool {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return false
+        }
+        let range = NSRange(contents.startIndex..., in: contents)
+        return regex.firstMatch(in: contents, range: range) != nil
     }
 
     private func isReusableRuntime(
@@ -186,13 +236,12 @@ struct ClaudePatchedRuntimeManager: @unchecked Sendable {
         return "node"
     }
 
-    private func patchCLIContents(_ contents: String, model: String) throws -> String {
+    private func patchCLIContents(_ contents: String) throws -> String {
         var patchedContents = contents
         patchedContents = try patchCustomModelValidation(in: patchedContents)
         patchedContents = try patchModelPickerOptions(in: patchedContents)
         patchedContents = try patchCustomAgentModels(in: patchedContents)
         patchedContents = patchContextLimit(in: patchedContents)
-        _ = model
         return patchedContents
     }
 

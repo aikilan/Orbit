@@ -33,7 +33,7 @@ final class CLIEnvironmentResolverTests: XCTestCase {
             model: "gpt-5.4"
         )
 
-        _ = try await resolver.resolveClaudeContext(
+        let context = try await resolver.resolveClaudeContext(
             for: account,
             workingDirectoryURL: FileManager.default.temporaryDirectory,
             appPaths: paths,
@@ -46,6 +46,7 @@ final class CLIEnvironmentResolverTests: XCTestCase {
 
         let requests = recorder.values()
         let snapshot = await bridgeManager.snapshot()
+        XCTAssertNil(context.executableOverrideURL)
         XCTAssertEqual(requests.count, 1)
         XCTAssertEqual(requests.first?.url?.path, "/v1/models")
         XCTAssertEqual(snapshot, ["gpt-4.1", "gpt-4o", "gpt-5.4"])
@@ -220,7 +221,7 @@ final class CLIEnvironmentResolverTests: XCTestCase {
             isActive: true
         )
 
-        _ = try await resolver.resolveClaudeContext(
+        let context = try await resolver.resolveClaudeContext(
             for: account,
             workingDirectoryURL: FileManager.default.temporaryDirectory,
             appPaths: paths,
@@ -232,6 +233,7 @@ final class CLIEnvironmentResolverTests: XCTestCase {
         )
 
         let snapshot = await bridgeManager.snapshot()
+        XCTAssertNil(context.executableOverrideURL)
         XCTAssertEqual(
             snapshot,
             [
@@ -368,7 +370,38 @@ final class CLIEnvironmentResolverTests: XCTestCase {
             codexOAuthClaudeBridgeManager: RecordingResolverCodexOAuthClaudeBridgeManager()
         )
 
+        XCTAssertNil(context.executableOverrideURL)
         XCTAssertEqual(context.providerSnapshot?.availableModels, ["MiniMax-M2.7"])
+    }
+
+    func testResolveClaudeContextUsesExecutableOverrideWhenRuntimeManagerReturnsOne() async throws {
+        let resolver = CLIEnvironmentResolver(session: makeSession())
+        let paths = try makePaths()
+        let account = makeProviderAccount(
+            platform: .claude,
+            rule: .claudeCompatible,
+            presetID: ProviderCatalog.customPresetID,
+            baseURL: "https://proxy.example/v1",
+            envName: "ANTHROPIC_API_KEY",
+            model: "claude-sonnet-4.5"
+        )
+        let overrideURL = paths.appSupportDirectoryURL
+            .appendingPathComponent("patched-runtime", isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("claude", isDirectory: false)
+
+        let context = try await resolver.resolveClaudeContext(
+            for: account,
+            workingDirectoryURL: FileManager.default.temporaryDirectory,
+            appPaths: paths,
+            codexAuthPayload: nil,
+            credential: .providerAPIKey(try ProviderAPIKeyCredential(apiKey: "sk-ant-test").validated()),
+            claudeProfileManager: ResolverClaudeProfileManager(),
+            claudePatchedRuntimeManager: ResolverPatchedRuntimeManager(executableOverrideURL: overrideURL),
+            codexOAuthClaudeBridgeManager: RecordingResolverCodexOAuthClaudeBridgeManager()
+        )
+
+        XCTAssertEqual(context.executableOverrideURL, overrideURL)
     }
 
     func testResolveClaudeContextPrefetchesModelsForAllBuiltInOpenAIPresets() async throws {
@@ -465,6 +498,62 @@ final class CLIEnvironmentResolverTests: XCTestCase {
 
             let snapshot = await bridgeManager.snapshot()
             XCTAssertEqual(snapshot, ["prefetched-model", preset.defaultModel], "preset=\(preset.id)")
+        }
+
+        let requests = recorder.values()
+        XCTAssertEqual(requests.count, presets.count)
+
+        for (request, preset) in zip(requests, presets) {
+            XCTAssertEqual(request.httpMethod, "GET", "preset=\(preset.id)")
+            XCTAssertEqual(request.url?.absoluteString, "\(preset.baseURL)/models", "preset=\(preset.id)")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json", "preset=\(preset.id)")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer key-\(preset.id)", "preset=\(preset.id)")
+        }
+    }
+
+    func testResolveCodexDesktopContextPrefetchesModelsForAllBuiltInOpenAIBridgePresets() async throws {
+        let recorder = RequestRecorder<URLRequest>()
+        ResolverMockURLProtocol.requestHandler = { request in
+            recorder.append(request)
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, Data(#"{"data":[{"id":"prefetched-model"}]}"#.utf8))
+        }
+
+        let resolver = CLIEnvironmentResolver(session: makeSession())
+        let paths = try makePaths()
+        let presets = ProviderCatalog.presets(for: .openAICompatible).filter { !$0.isCustom && !$0.supportsResponsesAPI }
+
+        for preset in presets {
+            let bridgeManager = RecordingResolverOpenAICompatibleProviderBridgeManager()
+            let account = makeProviderAccount(
+                platform: .codex,
+                rule: .openAICompatible,
+                presetID: preset.id,
+                baseURL: preset.baseURL,
+                envName: preset.apiKeyEnvName,
+                model: preset.defaultModel
+            )
+
+            let context = try await resolver.resolveCodexDesktopContext(
+                for: account,
+                appPaths: paths,
+                authPayload: nil,
+                providerAPIKeyCredential: try ProviderAPIKeyCredential(apiKey: "key-\(preset.id)").validated(),
+                openAICompatibleProviderCodexBridgeManager: bridgeManager,
+                claudeProviderCodexBridgeManager: RecordingResolverClaudeProviderBridgeManager()
+            )
+
+            let snapshot = await bridgeManager.snapshot()
+            XCTAssertEqual(snapshot, ["prefetched-model", preset.defaultModel], "preset=\(preset.id)")
+            XCTAssertEqual(context.modelCatalogSnapshot?.availableModels, ["prefetched-model", preset.defaultModel], "preset=\(preset.id)")
+            XCTAssertEqual(context.environmentVariables["OPENAI_API_KEY"], "openai-compatible-provider-bridge", "preset=\(preset.id)")
+            XCTAssertTrue(context.codexHomeURL.path.contains("/isolated-codex-instances/"), "preset=\(preset.id)")
+            XCTAssertTrue(context.configFileContents?.contains("model_provider = \"\(preset.id)\"") == true, "preset=\(preset.id)")
         }
 
         let requests = recorder.values()
@@ -650,8 +739,10 @@ private struct ResolverClaudeProfileManager: ClaudeProfileManaging {
 }
 
 private struct ResolverPatchedRuntimeManager: ClaudePatchedRuntimeManaging {
-    func preparePatchedRuntime(model: String, appSupportDirectoryURL: URL) throws -> URL {
-        appSupportDirectoryURL.appendingPathComponent("claude", isDirectory: false)
+    var executableOverrideURL: URL? = nil
+
+    func resolveExecutableOverride(model: String, appSupportDirectoryURL: URL) throws -> URL? {
+        executableOverrideURL
     }
 }
 

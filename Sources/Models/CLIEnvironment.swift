@@ -425,6 +425,15 @@ struct ResolvedCodexCLILaunchContext: Equatable, Sendable {
     let arguments: [String]
 }
 
+struct ResolvedCodexDesktopLaunchContext: Equatable, Sendable {
+    let accountID: UUID
+    let codexHomeURL: URL
+    let authPayload: CodexAuthPayload?
+    let modelCatalogSnapshot: ResolvedCodexModelCatalogSnapshot?
+    let configFileContents: String?
+    let environmentVariables: [String: String]
+}
+
 struct ResolvedCodexModelCatalogSnapshot: Equatable, Sendable {
     let availableModels: [String]
 }
@@ -443,7 +452,7 @@ struct ResolvedClaudeCLILaunchContext: Equatable, Sendable {
     let workingDirectoryURL: URL
     let rootURL: URL?
     let configDirectoryURL: URL?
-    let patchedExecutableURL: URL?
+    let executableOverrideURL: URL?
     let providerSnapshot: ResolvedClaudeProviderSnapshot?
     let environmentVariables: [String: String]
     let arguments: [String]

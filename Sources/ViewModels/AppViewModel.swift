@@ -108,6 +108,13 @@ final class AppViewModel: ObservableObject {
     @Published var addAccountProviderBaseURL = "https://api.openai.com/v1"
     @Published var addAccountProviderAPIKeyEnvName = "OPENAI_API_KEY"
     @Published var addAccountDefaultModel = "gpt-5.4"
+    @Published var desktopLaunchPresetID = "deepseek"
+    @Published var desktopLaunchDisplayName = ""
+    @Published var desktopLaunchDefaultModel = "deepseek-chat"
+    @Published var desktopLaunchAPIKeyInput = ""
+    @Published var desktopLaunchStatus = L10n.tr("选择预设 Provider，保存后直接启动独立 Codex。")
+    @Published var desktopLaunchError: String?
+    @Published private(set) var isLaunchingDesktopLaunch = false
     @Published var banner: BannerState?
     @Published var pendingDeleteAccountID: UUID?
     @Published private(set) var refreshingAccountIDs: Set<UUID> = []
@@ -397,6 +404,16 @@ final class AppViewModel: ObservableObject {
         ProviderCatalog.preset(id: addAccountProviderPresetID)
     }
 
+    var availableDesktopLaunchPresets: [ProviderPreset] {
+        ProviderCatalog.presets(for: .openAICompatible).filter {
+            ["deepseek", "moonshot", "minimax", "minimax_cn", "zai", "bigmodel"].contains($0.id)
+        }
+    }
+
+    var selectedDesktopLaunchPreset: ProviderPreset? {
+        ProviderCatalog.preset(id: desktopLaunchPresetID)
+    }
+
     func canEditProviderAccount(_ account: ManagedAccount) -> Bool {
         account.authKind == .providerAPIKey
     }
@@ -437,8 +454,14 @@ final class AppViewModel: ObservableObject {
     }
 
     func canLaunchIsolatedCodex(for account: ManagedAccount) -> Bool {
-        guard account.providerRule == .chatgptOAuth else { return false }
-        return !(account.isActive && account.authKind == .chatgpt) && !hasLaunchedIsolatedInstance(for: account.id)
+        switch account.providerRule {
+        case .chatgptOAuth:
+            return !(account.isActive && account.authKind == .chatgpt) && !hasLaunchedIsolatedInstance(for: account.id)
+        case .openAICompatible:
+            return !hasLaunchedIsolatedInstance(for: account.id)
+        case .claudeCompatible, .claudeProfile:
+            return false
+        }
     }
 
     var isSwitchInProgress: Bool {
@@ -488,6 +511,15 @@ final class AppViewModel: ObservableObject {
         addAccountProviderRule = .openAICompatible
         applyProviderPreset(ProviderCatalog.preset(id: "openai"))
         addAccountStatus = selectedAddAccountMessage
+    }
+
+    func prepareProviderDesktopLaunch() {
+        desktopLaunchDisplayName = ""
+        desktopLaunchAPIKeyInput = ""
+        desktopLaunchError = nil
+        isLaunchingDesktopLaunch = false
+        applyDesktopLaunchPreset(availableDesktopLaunchPresets.first)
+        desktopLaunchStatus = L10n.tr("选择预设 Provider，保存后直接启动独立 Codex。")
     }
 
     func openEditProvider(for accountID: UUID) {
@@ -707,10 +739,97 @@ final class AppViewModel: ObservableObject {
     }
 
     func launchIsolatedCodex(for account: ManagedAccount) async {
-        guard account.providerRule == .chatgptOAuth else {
+        switch account.providerRule {
+        case .chatgptOAuth:
+            await launchChatGPTIsolatedCodex(for: account)
+        case .openAICompatible:
+            await launchProviderIsolatedCodex(for: account)
+        case .claudeCompatible, .claudeProfile:
             pushBanner(level: .warning, message: unsupportedMessage(for: account.platform))
-            return
         }
+    }
+
+    @discardableResult
+    func startProviderDesktopLaunch() async -> Bool {
+        desktopLaunchError = nil
+        let trimmedAPIKey = desktopLaunchAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedDisplayName = desktopLaunchDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedModel = desktopLaunchDefaultModel.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let preset = selectedDesktopLaunchPreset else {
+            desktopLaunchError = L10n.tr("请选择一个可用的预设 Provider。")
+            return false
+        }
+
+        guard !trimmedAPIKey.isEmpty else {
+            desktopLaunchError = L10n.tr("请输入 API Key。")
+            return false
+        }
+
+        guard !trimmedModel.isEmpty else {
+            desktopLaunchError = L10n.tr("请输入默认模型。")
+            return false
+        }
+
+        desktopLaunchStatus = L10n.tr("正在保存 Provider 并启动 Codex。")
+        isLaunchingDesktopLaunch = true
+        defer { isLaunchingDesktopLaunch = false }
+
+        do {
+            let credential = try ProviderAPIKeyCredential(apiKey: trimmedAPIKey).validated()
+            let identity = resolveProviderIdentity(
+                from: credential,
+                providerRule: preset.rule,
+                providerPresetID: preset.id,
+                providerName: preset.displayName,
+                preferredDisplayName: trimmedDisplayName.isEmpty ? nil : trimmedDisplayName
+            )
+            var account = upsertProviderAccount(
+                identity: identity,
+                makeActive: false,
+                providerRule: preset.rule,
+                providerPresetID: preset.id,
+                providerDisplayName: preset.displayName,
+                providerBaseURL: preset.baseURL,
+                providerAPIKeyEnvName: preset.apiKeyEnvName,
+                defaultModel: trimmedModel
+            )
+            if !trimmedDisplayName.isEmpty {
+                account.displayName = trimmedDisplayName
+                database.upsert(account: account)
+            }
+            try credentialStore.save(.providerAPIKey(credential), for: account.id)
+
+            let context = try await cliEnvironmentResolver.resolveCodexDesktopContext(
+                for: account,
+                appPaths: paths,
+                authPayload: nil,
+                providerAPIKeyCredential: credential,
+                openAICompatibleProviderCodexBridgeManager: openAICompatibleProviderCodexBridgeManager,
+                claudeProviderCodexBridgeManager: claudeProviderCodexBridgeManager
+            )
+            _ = try instanceLauncher.launchIsolatedInstance(context: context)
+
+            launchedIsolatedInstanceAccountIDs.insert(account.id)
+            setActiveAccount(account.id)
+            selectedAccountID = account.id
+
+            let message = L10n.tr("已保存账号 %@，并启动独立 Codex 实例。", account.displayName)
+            database.appendLog(level: .info, message: message)
+            try await persistDatabase()
+            pushBanner(level: .info, message: message)
+            dismissProviderDesktopLaunch()
+            return true
+        } catch {
+            desktopLaunchError = error.localizedDescription
+            desktopLaunchStatus = L10n.tr("预设 Provider 启动失败。")
+            database.appendLog(level: .error, message: L10n.tr("预设 Provider 启动失败：%@", error.localizedDescription))
+            try? await persistDatabase()
+            return false
+        }
+    }
+
+    private func launchChatGPTIsolatedCodex(for account: ManagedAccount) async {
         if hasLaunchedIsolatedInstance(for: account.id) {
             pushBanner(level: .info, message: L10n.tr("账号 %@ 的独立实例已在当前会话中启动。", account.displayName))
             return
@@ -758,6 +877,40 @@ final class AppViewModel: ObservableObject {
                 payload: payload,
                 appSupportDirectoryURL: paths.appSupportDirectoryURL
             )
+            launchedIsolatedInstanceAccountIDs.insert(account.id)
+            pushBanner(level: .info, message: L10n.tr("已为账号 %@ 启动独立 Codex 实例。", account.displayName))
+        } catch {
+            pushBanner(level: .error, message: L10n.tr("启动独立 Codex 实例失败：%@", error.localizedDescription))
+        }
+    }
+
+    private func launchProviderIsolatedCodex(for account: ManagedAccount) async {
+        if hasLaunchedIsolatedInstance(for: account.id) {
+            pushBanner(level: .info, message: L10n.tr("账号 %@ 的独立实例已在当前会话中启动。", account.displayName))
+            return
+        }
+        guard canLaunchIsolatedCodex(for: account) else { return }
+        guard launchingIsolatedInstanceAccountID == nil else { return }
+        launchingIsolatedInstanceAccountID = account.id
+        defer {
+            if launchingIsolatedInstanceAccountID == account.id {
+                launchingIsolatedInstanceAccountID = nil
+            }
+        }
+
+        do {
+            guard let credential = try latestCredential(for: account).providerAPIKeyCredential else {
+                throw CredentialStoreError.unexpectedData
+            }
+            let context = try await cliEnvironmentResolver.resolveCodexDesktopContext(
+                for: account,
+                appPaths: paths,
+                authPayload: nil,
+                providerAPIKeyCredential: credential,
+                openAICompatibleProviderCodexBridgeManager: openAICompatibleProviderCodexBridgeManager,
+                claudeProviderCodexBridgeManager: claudeProviderCodexBridgeManager
+            )
+            _ = try instanceLauncher.launchIsolatedInstance(context: context)
             launchedIsolatedInstanceAccountIDs.insert(account.id)
             pushBanner(level: .info, message: L10n.tr("已为账号 %@ 启动独立 Codex 实例。", account.displayName))
         } catch {
@@ -857,6 +1010,7 @@ final class AppViewModel: ObservableObject {
             let identity = resolveProviderIdentity(
                 from: credential,
                 providerRule: addAccountProviderRule,
+                providerPresetID: addAccountProviderPresetID,
                 providerName: addAccountProviderDisplayName.trimmingCharacters(in: .whitespacesAndNewlines),
                 preferredDisplayName: preferredDisplayName.isEmpty ? nil : preferredDisplayName
             )
@@ -1046,6 +1200,10 @@ final class AppViewModel: ObservableObject {
         prepareAddAccountSheet()
     }
 
+    func dismissProviderDesktopLaunch() {
+        prepareProviderDesktopLaunch()
+    }
+
     private func finalizeCodexLogin(_ result: AuthLoginResult) async throws {
         let account = upsertAccount(identity: result.identity, payload: result.payload, makeActive: false)
         try credentialStore.save(.codex(result.payload), for: account.id)
@@ -1080,7 +1238,16 @@ final class AppViewModel: ObservableObject {
         identity: AuthIdentity,
         credential: ProviderAPIKeyCredential
     ) async throws {
-        let account = upsertProviderAccount(identity: identity, makeActive: false)
+        let account = upsertProviderAccount(
+            identity: identity,
+            makeActive: false,
+            providerRule: addAccountProviderRule,
+            providerPresetID: addAccountProviderPresetID,
+            providerDisplayName: addAccountProviderDisplayName.trimmingCharacters(in: .whitespacesAndNewlines),
+            providerBaseURL: addAccountProviderBaseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            providerAPIKeyEnvName: addAccountProviderAPIKeyEnvName.trimmingCharacters(in: .whitespacesAndNewlines),
+            defaultModel: addAccountDefaultModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         try credentialStore.save(.providerAPIKey(credential), for: account.id)
         setActiveAccount(account.id)
         selectedAccountID = account.id
@@ -1140,6 +1307,7 @@ final class AppViewModel: ObservableObject {
             let identity = resolveProviderIdentity(
                 from: resolvedCredential,
                 providerRule: addAccountProviderRule,
+                providerPresetID: addAccountProviderPresetID,
                 providerName: trimmedProviderName,
                 preferredDisplayName: trimmedDisplayName.isEmpty ? nil : trimmedDisplayName
             )
@@ -1228,13 +1396,14 @@ final class AppViewModel: ObservableObject {
     private func resolveProviderIdentity(
         from credential: ProviderAPIKeyCredential,
         providerRule: ProviderRule,
+        providerPresetID: String?,
         providerName: String,
         preferredDisplayName: String? = nil
     ) -> AuthIdentity {
         let suffix = String(credential.apiKey.suffix(6))
         let providerTitle = providerName.isEmpty
             ? ProviderCatalog.providerDisplayName(
-                presetID: addAccountProviderPresetID,
+                presetID: providerPresetID,
                 fallbackDisplayName: nil,
                 fallbackRule: providerRule
             )
@@ -1321,11 +1490,20 @@ final class AppViewModel: ObservableObject {
         return account
     }
 
-    private func upsertProviderAccount(identity: AuthIdentity, makeActive: Bool) -> ManagedAccount {
+    private func upsertProviderAccount(
+        identity: AuthIdentity,
+        makeActive: Bool,
+        providerRule: ProviderRule,
+        providerPresetID: String?,
+        providerDisplayName: String,
+        providerBaseURL: String,
+        providerAPIKeyEnvName: String,
+        defaultModel: String
+    ) -> ManagedAccount {
         let existing = database.accounts.first(where: { $0.accountIdentifier == identity.accountID })
-        let providerDisplayName = addAccountProviderDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedProviderDisplayName = providerDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let platform: PlatformKind = addAccountProviderRule == .claudeCompatible ? .claude : .codex
+        let platform: PlatformKind = providerRule == .claudeCompatible ? .claude : .codex
         let account = ManagedAccount(
             id: existing?.id ?? UUID(),
             platform: platform,
@@ -1333,13 +1511,15 @@ final class AppViewModel: ObservableObject {
             displayName: existing?.displayName ?? identity.displayName,
             email: identity.email ?? existing?.email,
             authKind: .providerAPIKey,
-            providerRule: addAccountProviderRule,
-            providerPresetID: addAccountProviderPresetID,
-            providerDisplayName: providerDisplayName.isEmpty ? selectedProviderPreset?.displayName : providerDisplayName,
-            providerBaseURL: addAccountProviderBaseURL.trimmingCharacters(in: .whitespacesAndNewlines),
-            providerAPIKeyEnvName: addAccountProviderAPIKeyEnvName.trimmingCharacters(in: .whitespacesAndNewlines),
-            defaultModel: addAccountDefaultModel.trimmingCharacters(in: .whitespacesAndNewlines),
-            defaultCLITarget: existing?.defaultCLITarget ?? addAccountProviderRule.defaultTarget,
+            providerRule: providerRule,
+            providerPresetID: providerPresetID,
+            providerDisplayName: trimmedProviderDisplayName.isEmpty
+                ? ProviderCatalog.preset(id: providerPresetID)?.displayName
+                : trimmedProviderDisplayName,
+            providerBaseURL: providerBaseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            providerAPIKeyEnvName: providerAPIKeyEnvName.trimmingCharacters(in: .whitespacesAndNewlines),
+            defaultModel: defaultModel.trimmingCharacters(in: .whitespacesAndNewlines),
+            defaultCLITarget: existing?.defaultCLITarget ?? providerRule.defaultTarget,
             createdAt: existing?.createdAt ?? Date(),
             lastUsedAt: existing?.lastUsedAt,
             lastQuotaSnapshotAt: existing?.lastQuotaSnapshotAt,
@@ -2002,11 +2182,13 @@ final class AppViewModel: ObservableObject {
                 return (account, snapshot)
             }
             .max { lhs, rhs in
-                let leftScore = lhs.1.primary.remainingPercent + lhs.1.secondary.remainingPercent
-                let rightScore = rhs.1.primary.remainingPercent + rhs.1.secondary.remainingPercent
+                let leftSecondaryRemaining = lhs.1.secondary?.remainingPercent ?? 0
+                let rightSecondaryRemaining = rhs.1.secondary?.remainingPercent ?? 0
+                let leftScore = lhs.1.primary.remainingPercent + leftSecondaryRemaining
+                let rightScore = rhs.1.primary.remainingPercent + rightSecondaryRemaining
                 if leftScore == rightScore {
                     if lhs.1.primary.remainingPercent == rhs.1.primary.remainingPercent {
-                        return lhs.1.secondary.remainingPercent < rhs.1.secondary.remainingPercent
+                        return leftSecondaryRemaining < rightSecondaryRemaining
                     }
                     return lhs.1.primary.remainingPercent < rhs.1.primary.remainingPercent
                 }
@@ -2050,6 +2232,14 @@ final class AppViewModel: ObservableObject {
         addAccountProviderDisplayName = ""
         addAccountError = nil
         isAuthenticating = false
+    }
+
+    func applyDesktopLaunchPreset(_ preset: ProviderPreset?) {
+        guard let preset else { return }
+        desktopLaunchPresetID = preset.id
+        desktopLaunchDefaultModel = preset.defaultModel
+        desktopLaunchError = nil
+        desktopLaunchStatus = L10n.tr("将使用 %@ 预设启动独立 Codex。", preset.displayName)
     }
 
     func applyProviderPreset(_ preset: ProviderPreset?) {

@@ -3,7 +3,7 @@ import XCTest
 @testable import Orbit
 
 final class ClaudePatchedRuntimeManagerTests: XCTestCase {
-    func testPreparePatchedRuntimeCopiesPackageAndAppliesPatches() throws {
+    func testResolveExecutableOverrideCopiesPackageAndAppliesLegacyPatches() throws {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? fileManager.removeItem(at: rootURL) }
@@ -20,9 +20,11 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
             resolveClaudeExecutableURL: { sourceCLIURL }
         )
 
-        let runtimeURL = try manager.preparePatchedRuntime(
-            model: "openrouter/anthropic/claude-sonnet-4.5",
-            appSupportDirectoryURL: appSupportURL
+        let runtimeURL = try XCTUnwrap(
+            try manager.resolveExecutableOverride(
+                model: "openrouter/anthropic/claude-sonnet-4.5",
+                appSupportDirectoryURL: appSupportURL
+            )
         )
 
         let wrapperContents = try String(contentsOf: runtimeURL, encoding: .utf8)
@@ -43,7 +45,7 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
         XCTAssertTrue(patchedCLIContents.contains("CLAUDE_CODE_CONTEXT_LIMIT"))
     }
 
-    func testPreparePatchedRuntimeCachesByVersionAndModel() throws {
+    func testResolveExecutableOverrideCachesLegacyRuntimeByVersionAndModel() throws {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? fileManager.removeItem(at: rootURL) }
@@ -62,24 +64,30 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
             resolveClaudeExecutableURL: { sourceV2CLIURL }
         )
 
-        let runtimeV1 = try managerV1.preparePatchedRuntime(
-            model: "openrouter/anthropic/claude-sonnet-4.5",
-            appSupportDirectoryURL: appSupportURL
+        let runtimeV1 = try XCTUnwrap(
+            try managerV1.resolveExecutableOverride(
+                model: "openrouter/anthropic/claude-sonnet-4.5",
+                appSupportDirectoryURL: appSupportURL
+            )
         )
-        let runtimeV1Repeat = try managerV1.preparePatchedRuntime(
-            model: "openrouter/anthropic/claude-sonnet-4.5",
-            appSupportDirectoryURL: appSupportURL
+        let runtimeV1Repeat = try XCTUnwrap(
+            try managerV1.resolveExecutableOverride(
+                model: "openrouter/anthropic/claude-sonnet-4.5",
+                appSupportDirectoryURL: appSupportURL
+            )
         )
-        let runtimeV2 = try managerV2.preparePatchedRuntime(
-            model: "openrouter/anthropic/claude-sonnet-4.5",
-            appSupportDirectoryURL: appSupportURL
+        let runtimeV2 = try XCTUnwrap(
+            try managerV2.resolveExecutableOverride(
+                model: "openrouter/anthropic/claude-sonnet-4.5",
+                appSupportDirectoryURL: appSupportURL
+            )
         )
 
         XCTAssertEqual(runtimeV1, runtimeV1Repeat)
         XCTAssertNotEqual(runtimeV1, runtimeV2)
     }
 
-    func testPreparePatchedRuntimeRebuildsCachedRuntimeWhenWrapperContainsLegacySupportPath() throws {
+    func testResolveExecutableOverrideRebuildsCachedRuntimeWhenWrapperContainsLegacySupportPath() throws {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? fileManager.removeItem(at: rootURL) }
@@ -93,9 +101,11 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
             resolveClaudeExecutableURL: { sourceCLIURL }
         )
 
-        let runtimeURL = try manager.preparePatchedRuntime(
-            model: "openrouter/anthropic/claude-sonnet-4.5",
-            appSupportDirectoryURL: appSupportURL
+        let runtimeURL = try XCTUnwrap(
+            try manager.resolveExecutableOverride(
+                model: "openrouter/anthropic/claude-sonnet-4.5",
+                appSupportDirectoryURL: appSupportURL
+            )
         )
 
         let legacyWrapperContents = """
@@ -107,9 +117,11 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
         try legacyWrapperContents.write(to: runtimeURL, atomically: true, encoding: .utf8)
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: runtimeURL.path)
 
-        let rebuiltRuntimeURL = try manager.preparePatchedRuntime(
-            model: "openrouter/anthropic/claude-sonnet-4.5",
-            appSupportDirectoryURL: appSupportURL
+        let rebuiltRuntimeURL = try XCTUnwrap(
+            try manager.resolveExecutableOverride(
+                model: "openrouter/anthropic/claude-sonnet-4.5",
+                appSupportDirectoryURL: appSupportURL
+            )
         )
         let rebuiltWrapperContents = try String(contentsOf: rebuiltRuntimeURL, encoding: .utf8)
 
@@ -118,7 +130,7 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
         XCTAssertTrue(rebuiltWrapperContents.contains(appSupportURL.path))
     }
 
-    func testPreparePatchedRuntimeSupportsInlineAgentModelEnumShape() throws {
+    func testResolveExecutableOverrideSupportsInlineAgentModelEnumShape() throws {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? fileManager.removeItem(at: rootURL) }
@@ -158,9 +170,11 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
             resolveClaudeExecutableURL: { cliURL }
         )
 
-        let runtimeURL = try manager.preparePatchedRuntime(
-            model: "gpt-5.4",
-            appSupportDirectoryURL: appSupportURL
+        let runtimeURL = try XCTUnwrap(
+            try manager.resolveExecutableOverride(
+                model: "gpt-5.4",
+                appSupportDirectoryURL: appSupportURL
+            )
         )
         let patchedCLIURL = runtimeURL
             .deletingLastPathComponent()
@@ -175,7 +189,7 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
         XCTAssertTrue(patchedCLIContents.contains("CLAUDE_CODE_CONTEXT_LIMIT"))
     }
 
-    func testPreparePatchedRuntimeSupportsCurrentModelValidationShape() throws {
+    func testResolveExecutableOverrideSupportsCurrentModelValidationShape() throws {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? fileManager.removeItem(at: rootURL) }
@@ -216,9 +230,11 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
             resolveClaudeExecutableURL: { cliURL }
         )
 
-        let runtimeURL = try manager.preparePatchedRuntime(
-            model: "gpt-5.4",
-            appSupportDirectoryURL: appSupportURL
+        let runtimeURL = try XCTUnwrap(
+            try manager.resolveExecutableOverride(
+                model: "gpt-5.4",
+                appSupportDirectoryURL: appSupportURL
+            )
         )
         let patchedCLIURL = runtimeURL
             .deletingLastPathComponent()
@@ -231,6 +247,77 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
         XCTAssertTrue(patchedCLIContents.contains("function f68(q){let __managedAvailableModels=(J7()||{}).availableModels;if(!__managedAvailableModels)return q;"))
         XCTAssertTrue(patchedCLIContents.contains("model:h.string().optional().describe(\"Optional model override for this agent."))
         XCTAssertTrue(patchedCLIContents.contains("var c01=(+process.env.CLAUDE_CODE_CONTEXT_LIMIT||200000),Ev4=20000"))
+    }
+
+    func testResolveExecutableOverrideReturnsNilForNativeSupportedRuntime() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+
+        let sourceCLIURL = try makeNativeSupportedRuntime(rootURL: rootURL, version: "2.1.88")
+        let appSupportURL = rootURL.appendingPathComponent("app-support", isDirectory: true)
+        try fileManager.createDirectory(at: appSupportURL, withIntermediateDirectories: true)
+
+        let manager = ClaudePatchedRuntimeManager(
+            fileManager: fileManager,
+            resolveClaudeExecutableURL: { sourceCLIURL }
+        )
+
+        let executableOverrideURL = try manager.resolveExecutableOverride(
+            model: "gpt-5.4",
+            appSupportDirectoryURL: appSupportURL
+        )
+
+        XCTAssertNil(executableOverrideURL)
+        XCTAssertFalse(
+            fileManager.fileExists(
+                atPath: appSupportURL.appendingPathComponent("claude-patched-runtimes", isDirectory: true).path
+            )
+        )
+    }
+
+    func testResolveExecutableOverrideIncludesVersionWhenLegacyPatchFails() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+
+        let packageURL = rootURL
+            .appendingPathComponent("9.9.9-unsupported", isDirectory: true)
+            .appendingPathComponent("claude-code", isDirectory: true)
+        try fileManager.createDirectory(at: packageURL, withIntermediateDirectories: true)
+
+        let cliURL = packageURL.appendingPathComponent("cli.js", isDirectory: false)
+        let nodeURL = packageURL.appendingPathComponent("node", isDirectory: false)
+        let packageJSONURL = packageURL.appendingPathComponent("package.json", isDirectory: false)
+        let appSupportURL = rootURL.appendingPathComponent("app-support", isDirectory: true)
+        try fileManager.createDirectory(at: appSupportURL, withIntermediateDirectories: true)
+
+        try "#!/usr/bin/env node\nconst unsupportedRuntime = true;\n".write(to: cliURL, atomically: true, encoding: .utf8)
+        try "#!/bin/sh\nexit 0\n".write(to: nodeURL, atomically: true, encoding: .utf8)
+        try """
+        {
+          "name": "@anthropic-ai/claude-code",
+          "version": "9.9.9"
+        }
+        """.write(to: packageJSONURL, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cliURL.path)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: nodeURL.path)
+
+        let manager = ClaudePatchedRuntimeManager(
+            fileManager: fileManager,
+            resolveClaudeExecutableURL: { cliURL }
+        )
+
+        XCTAssertThrowsError(
+            try manager.resolveExecutableOverride(
+                model: "gpt-5.4",
+                appSupportDirectoryURL: appSupportURL
+            )
+        ) { error in
+            let message = error.localizedDescription
+            XCTAssertTrue(message.contains("9.9.9"))
+            XCTAssertTrue(message.contains("没有找到自定义模型校验入口"))
+        }
     }
 
     private func makeSourceRuntime(rootURL: URL, version: String) throws -> URL {
@@ -253,6 +340,37 @@ final class ClaudePatchedRuntimeManagerTests: XCTestCase {
         function sample(){return {schema:{foo:1,model:u.enum(oEH).optional()}}}
         );let J=K&&typeof K==="string"&&oEH.includes(K)
         var af1=200000,sF4=20000;
+        """.write(to: cliURL, atomically: true, encoding: .utf8)
+        try "#!/bin/sh\nexit 0\n".write(to: nodeURL, atomically: true, encoding: .utf8)
+        try """
+        {
+          "name": "@anthropic-ai/claude-code",
+          "version": "\(version)"
+        }
+        """.write(to: packageJSONURL, atomically: true, encoding: .utf8)
+
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cliURL.path)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: nodeURL.path)
+
+        return cliURL
+    }
+
+    private func makeNativeSupportedRuntime(rootURL: URL, version: String) throws -> URL {
+        let fileManager = FileManager.default
+        let packageURL = rootURL
+            .appendingPathComponent(version, isDirectory: true)
+            .appendingPathComponent("claude-code", isDirectory: true)
+        try fileManager.createDirectory(at: packageURL, withIntermediateDirectories: true)
+
+        let cliURL = packageURL.appendingPathComponent("cli.js", isDirectory: false)
+        let nodeURL = packageURL.appendingPathComponent("node", isDirectory: false)
+        let packageJSONURL = packageURL.appendingPathComponent("package.json", isDirectory: false)
+
+        try """
+        #!/usr/bin/env node
+        function BK6(q=!1){let K=[],_=process.env.ANTHROPIC_CUSTOM_MODEL_OPTION;if(_&&!K.some((A)=>A.value===_))K.push({value:_,label:process.env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME??_,description:process.env.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION??`Custom model (${_})`});return K}
+        async function vL6(q){let K=q.trim();if(!K)return{valid:!1,error:"Model name cannot be empty"};if(K===process.env.ANTHROPIC_CUSTOM_MODEL_OPTION)return{valid:!0};return{valid:!0}}
+        function BN6(){if(process.env.CLAUDE_CODE_SUBAGENT_MODEL)return process.env.CLAUDE_CODE_SUBAGENT_MODEL;return "inherit"}
         """.write(to: cliURL, atomically: true, encoding: .utf8)
         try "#!/bin/sh\nexit 0\n".write(to: nodeURL, atomically: true, encoding: .utf8)
         try """

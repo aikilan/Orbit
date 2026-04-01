@@ -14,13 +14,16 @@ enum ClaudeCLILauncherError: LocalizedError, Equatable {
 struct ClaudeCLILauncher {
     private let fileManager: FileManager
     private let runAppleScript: ([String]) throws -> Void
+    private let resolveClaudeExecutable: @Sendable (FileManager) throws -> URL?
 
     init(
         fileManager: FileManager = .default,
-        runAppleScript: @escaping ([String]) throws -> Void = Self.runAppleScript
+        runAppleScript: @escaping ([String]) throws -> Void = Self.runAppleScript,
+        resolveClaudeExecutable: @escaping @Sendable (FileManager) throws -> URL? = Self.resolveClaudeExecutable
     ) {
         self.fileManager = fileManager
         self.runAppleScript = runAppleScript
+        self.resolveClaudeExecutable = resolveClaudeExecutable
     }
 
     func launchCLI(context: ResolvedClaudeCLILaunchContext) throws {
@@ -30,7 +33,12 @@ struct ClaudeCLILauncher {
 
     private func command(for context: ResolvedClaudeCLILaunchContext) throws -> String {
         let prefix = "cd \(shellQuoted(context.workingDirectoryURL.standardizedFileURL.path)) && "
-        let executable = context.patchedExecutableURL.map { shellQuoted($0.path) } ?? resolvedExecutable()
+        let executable: String
+        if let executableOverrideURL = context.executableOverrideURL {
+            executable = shellQuoted(executableOverrideURL.path)
+        } else {
+            executable = try resolvedExecutable()
+        }
         let executableCommand = ([executable] + context.arguments.map(shellQuoted)).joined(separator: " ")
 
         var environmentVariables = context.environmentVariables
@@ -96,17 +104,25 @@ struct ClaudeCLILauncher {
         return normalized
     }
 
-    private func resolvedExecutable() -> String {
+    private func resolvedExecutable() throws -> String {
+        if let executableURL = try resolveClaudeExecutable(fileManager) {
+            return shellQuoted(executableURL.path)
+        }
+
+        return "claude"
+    }
+
+    private static func resolveClaudeExecutable(_ fileManager: FileManager) throws -> URL? {
         let fixedURL = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent(".local", isDirectory: true)
             .appendingPathComponent("bin", isDirectory: true)
             .appendingPathComponent("claude")
 
         if fileManager.isExecutableFile(atPath: fixedURL.path) {
-            return shellQuoted(fixedURL.path)
+            return fixedURL
         }
 
-        return "claude"
+        return nil
     }
 
     private func envCommand(environmentVariables: [String: String], executable: String) -> String {
