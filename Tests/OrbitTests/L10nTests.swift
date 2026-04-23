@@ -89,6 +89,8 @@ final class L10nTests: XCTestCase {
         XCTAssertEqual(L10n.tr("默认模型"), "Default Model")
         XCTAssertEqual(L10n.tr("API Key 环境变量"), "API Key Environment Variable")
         XCTAssertEqual(L10n.tr("选择账号接入方式。"), "Choose how to add the account.")
+        XCTAssertEqual(L10n.tr("重新登录授权"), "Reauthorize Sign-in")
+        XCTAssertEqual(L10n.tr("开始重新授权"), "Start Reauthorization")
         XCTAssertEqual(
             L10n.tr("通过浏览器登录 ChatGPT 账号，后续可以直接打开 Codex CLI 或 Claude Code。"),
             "Sign in with a ChatGPT account in the browser. You can then open Codex CLI or Claude Code directly."

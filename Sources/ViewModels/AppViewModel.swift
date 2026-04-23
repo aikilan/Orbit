@@ -83,6 +83,7 @@ enum AddAccountMode: String, CaseIterable, Identifiable {
 enum AddAccountSheetMode: Equatable {
     case create
     case editProvider(accountID: UUID)
+    case reauthorize(accountID: UUID)
 }
 
 private enum AccountStatusRefreshOutcome {
@@ -410,13 +411,43 @@ final class AppViewModel: ObservableObject {
         return false
     }
 
+    var isReauthorizingAccount: Bool {
+        if case .reauthorize = addAccountSheetMode {
+            return true
+        }
+        return false
+    }
+
+    var reauthorizingAccount: ManagedAccount? {
+        guard case let .reauthorize(accountID) = addAccountSheetMode else {
+            return nil
+        }
+        return database.account(id: accountID)
+    }
+
     var addAccountSheetTitle: String {
-        isEditingProviderAccount ? L10n.tr("编辑供应商") : L10n.tr("新增账号")
+        if isEditingProviderAccount {
+            return L10n.tr("编辑供应商")
+        }
+        if isReauthorizingAccount {
+            return L10n.tr("重新登录授权")
+        }
+        return L10n.tr("新增账号")
     }
 
     var addAccountActionButtonTitle: String {
         if isEditingProviderAccount {
             return L10n.tr("保存修改")
+        }
+        if isReauthorizingAccount {
+            switch addAccountMode {
+            case .chatgptBrowser:
+                return L10n.tr("开始重新授权")
+            case .githubCopilot:
+                return L10n.tr("重新登录 GitHub Copilot")
+            case .providerAPIKey, .claudeProfile:
+                return L10n.tr("重新登录授权")
+            }
         }
         switch addAccountMode {
         case .chatgptBrowser:
@@ -437,6 +468,9 @@ final class AppViewModel: ObservableObject {
     }
 
     var selectedAddAccountMessage: String {
+        if let account = reauthorizingAccount {
+            return L10n.tr("正在为账号 %@ 重新登录授权；完成后会更新本地凭据并激活该账号。", account.displayName)
+        }
         if isEditingProviderAccount {
             return L10n.tr("修改当前供应商配置；API Key 留空表示继续使用当前凭据。")
         }
@@ -488,6 +522,10 @@ final class AppViewModel: ObservableObject {
 
     func canEditProviderAccount(_ account: ManagedAccount) -> Bool {
         account.authKind == .providerAPIKey
+    }
+
+    func canReauthorizeAccount(_ account: ManagedAccount) -> Bool {
+        account.providerRule == .chatgptOAuth || account.providerRule == .githubCopilot
     }
 
     func defaultCLITarget(for account: ManagedAccount) -> CLIEnvironmentTarget {
@@ -661,6 +699,27 @@ final class AppViewModel: ObservableObject {
         addAccountProviderBaseURL = account.resolvedProviderBaseURL
         addAccountProviderAPIKeyEnvName = account.resolvedProviderAPIKeyEnvName
         addAccountDefaultModel = account.resolvedDefaultModel
+        addAccountStatus = selectedAddAccountMessage
+    }
+
+    func openReauthorize(for accountID: UUID) {
+        guard let account = database.account(id: accountID), canReauthorizeAccount(account) else {
+            return
+        }
+
+        resetAddAccountTransientState()
+        addAccountSheetMode = .reauthorize(accountID: accountID)
+        switch account.providerRule {
+        case .chatgptOAuth:
+            addAccountMode = .chatgptBrowser
+        case .githubCopilot:
+            addAccountMode = .githubCopilot
+            if let credential = try? credentialStore.load(for: accountID).copilotCredential {
+                copilotHostInput = credential.host
+            }
+        case .openAICompatible, .claudeCompatible, .claudeProfile:
+            return
+        }
         addAccountStatus = selectedAddAccountMessage
     }
 
@@ -1381,7 +1440,7 @@ final class AppViewModel: ObservableObject {
 
         do {
             let result = try await oauthClient.completeBrowserLogin(session: session, pastedInput: pastedInput)
-            try await finalizeCodexLogin(result)
+            try await finalizeBrowserCodexLogin(result)
         } catch {
             addAccountError = error.localizedDescription
             addAccountStatus = L10n.tr("手动回调验证失败。")
@@ -1484,14 +1543,20 @@ final class AppViewModel: ObservableObject {
             let trimmedHost = copilotHostInput.trimmingCharacters(in: .whitespacesAndNewlines)
             let resolvedHost = trimmedHost.isEmpty ? "https://github.com" : trimmedHost
             let preferredDisplayName = apiKeyDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let targetAccount = reauthorizingAccount
+            let defaultModel = targetAccount?.defaultModel
 
             addAccountStatus = L10n.tr("正在导入本机 GitHub Copilot 登录态。")
             let credential: CopilotCredential
             do {
-                credential = try await copilotProvider.importCredential(host: resolvedHost, defaultModel: nil)
+                let importedCredential = try await copilotProvider.importCredential(host: resolvedHost, defaultModel: defaultModel)
+                if let targetAccount, importedCredential.accountIdentifier != targetAccount.accountIdentifier {
+                    throw CopilotProviderError.importUnavailable
+                }
+                credential = importedCredential
                 addAccountStatus = L10n.tr("已导入本机 GitHub Copilot 登录态，正在完成接入。")
             } catch {
-                let challenge = try await copilotProvider.startDeviceLogin(host: resolvedHost, defaultModel: nil)
+                let challenge = try await copilotProvider.startDeviceLogin(host: resolvedHost, defaultModel: defaultModel)
                 openExternalURL(challenge.verificationURL)
                 addAccountStatus = L10n.tr("浏览器已打开。请在 GitHub 完成授权，并输入代码 %@。", challenge.userCode)
                 credential = try await copilotProvider.completeDeviceLogin(challenge)
@@ -1502,7 +1567,11 @@ final class AppViewModel: ObservableObject {
                 from: credential,
                 preferredDisplayName: preferredDisplayName.isEmpty ? nil : preferredDisplayName
             )
-            try await finalizeCopilotLogin(identity: identity, credential: credential)
+            if case let .reauthorize(accountID) = addAccountSheetMode {
+                try await finalizeCopilotReauthorization(credential: credential, accountID: accountID)
+            } else {
+                try await finalizeCopilotLogin(identity: identity, credential: credential)
+            }
         } catch {
             addAccountError = error.localizedDescription
             addAccountStatus = L10n.tr("GitHub Copilot 接入失败。")
@@ -1687,6 +1756,14 @@ final class AppViewModel: ObservableObject {
         prepareProviderDesktopLaunch()
     }
 
+    private func finalizeBrowserCodexLogin(_ result: AuthLoginResult) async throws {
+        if case let .reauthorize(accountID) = addAccountSheetMode {
+            try await finalizeCodexReauthorization(result, accountID: accountID)
+        } else {
+            try await finalizeCodexLogin(result)
+        }
+    }
+
     private func finalizeCodexLogin(_ result: AuthLoginResult) async throws {
         let account = upsertAccount(identity: result.identity, payload: result.payload, makeActive: false)
         try credentialStore.save(.codex(result.payload), for: account.id)
@@ -1696,6 +1773,40 @@ final class AppViewModel: ObservableObject {
         database.appendLog(level: .info, message: L10n.tr("已登录并激活账号 %@。", account.displayName))
         try await persistDatabase()
         await verifySwitch(at: Date(), for: account.id)
+        dismissAddAccountSheet()
+    }
+
+    private func finalizeCodexReauthorization(_ result: AuthLoginResult, accountID: UUID) async throws {
+        guard let existingAccount = database.account(id: accountID), existingAccount.providerRule == .chatgptOAuth else {
+            throw NSError(
+                domain: "AppViewModel",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: L10n.tr("当前账号不支持重新登录授权。")]
+            )
+        }
+        guard result.identity.accountID == existingAccount.accountIdentifier else {
+            throw NSError(
+                domain: "AppViewModel",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: L10n.tr("重新授权账号不匹配。请登录账号 %@。", existingAccount.displayName)]
+            )
+        }
+
+        var updatedAccount = existingAccount
+        updatedAccount.authKind = result.payload.authMode
+        updatedAccount.email = result.identity.email ?? existingAccount.email
+        updatedAccount.lastRefreshAt = CodexDateCoding.parse(result.payload.lastRefresh)
+        updatedAccount.planType = result.identity.planType ?? existingAccount.planType
+        updatedAccount.isActive = false
+
+        database.upsert(account: updatedAccount)
+        try credentialStore.save(.codex(result.payload), for: accountID)
+        try authFileManager.activatePreservingFileIdentity(result.payload)
+        setActiveAccount(accountID)
+        selectedAccountID = accountID
+        database.appendLog(level: .info, message: L10n.tr("已为账号 %@ 重新登录授权并激活。", updatedAccount.displayName))
+        try await persistDatabase()
+        await verifySwitch(at: Date(), for: accountID)
         dismissAddAccountSheet()
     }
 
@@ -1756,6 +1867,57 @@ final class AppViewModel: ObservableObject {
         database.appendLog(level: .info, message: L10n.tr("已登录并激活账号 %@。", account.displayName))
         try await persistDatabase()
         pushBanner(level: .info, message: L10n.tr("已切换到账号 %@。", account.displayName))
+        dismissAddAccountSheet()
+    }
+
+    private func finalizeCopilotReauthorization(
+        credential: CopilotCredential,
+        accountID: UUID
+    ) async throws {
+        guard let existingAccount = database.account(id: accountID), existingAccount.providerRule == .githubCopilot else {
+            throw NSError(
+                domain: "AppViewModel",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: L10n.tr("当前账号不支持重新登录授权。")]
+            )
+        }
+        guard credential.accountIdentifier == existingAccount.accountIdentifier else {
+            throw NSError(
+                domain: "AppViewModel",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: L10n.tr("重新授权账号不匹配。请登录账号 %@。", existingAccount.displayName)]
+            )
+        }
+
+        let existingCredential = try? credentialStore.load(for: accountID).copilotCredential
+        let mergedCredential = try CopilotCredential(
+            configDirectoryName: existingCredential?.configDirectoryName ?? credential.configDirectoryName,
+            host: credential.host,
+            login: credential.login,
+            githubAccessToken: credential.githubAccessToken,
+            accessToken: credential.accessToken,
+            defaultModel: existingAccount.defaultModel ?? credential.defaultModel,
+            source: credential.source
+        ).validated()
+        let managedCredential = try await ensureManagedCopilotCredential(
+            for: existingAccount,
+            credential: mergedCredential,
+            model: existingAccount.defaultModel ?? credential.defaultModel
+        )
+
+        var updatedAccount = existingAccount
+        updatedAccount.email = managedCredential.credentialSummary
+        updatedAccount.defaultModel = existingAccount.defaultModel ?? managedCredential.defaultModel
+        updatedAccount.isActive = false
+
+        database.upsert(account: updatedAccount)
+        try credentialStore.save(.copilot(managedCredential), for: accountID)
+        setActiveAccount(accountID)
+        selectedAccountID = accountID
+        let message = L10n.tr("已为账号 %@ 重新登录授权并激活。", updatedAccount.displayName)
+        database.appendLog(level: .info, message: message)
+        try await persistDatabase()
+        pushBanner(level: .info, message: message)
         dismissAddAccountSheet()
     }
 
@@ -2923,7 +3085,7 @@ final class AppViewModel: ObservableObject {
             do {
                 let result = try await self.oauthClient.completeBrowserLogin(session: session)
                 self.addAccountStatus = L10n.tr("浏览器回调已收到，正在完成登录。")
-                try await self.finalizeCodexLogin(result)
+                try await self.finalizeBrowserCodexLogin(result)
             } catch {
                 guard !Task.isCancelled else { return }
                 self.addAccountError = error.localizedDescription

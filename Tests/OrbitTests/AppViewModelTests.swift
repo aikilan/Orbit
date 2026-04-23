@@ -1637,6 +1637,267 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(try harness.credentialStore.load(for: copilotAccount.id).copilotCredential?.source, .orbitOAuth)
     }
 
+    func testReauthorizeChatGPTAccountUpdatesExistingCredentialAndActivatesAccount() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let refreshedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_new")
+        let authFileManager = RecordingAuthFileManager()
+        let oauthClient = MockOAuthClient(
+            refreshResult: .failure(MockError.refreshFailed),
+            browserLoginResult: .success(
+                AuthLoginResult(
+                    payload: refreshedPayload,
+                    identity: AuthIdentity(
+                        accountID: "acct_cached",
+                        displayName: "Refreshed User",
+                        email: "refresh@example.com",
+                        planType: "plus"
+                    )
+                )
+            )
+        )
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: authFileManager,
+            oauthClient: oauthClient,
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false)
+        )
+
+        await harness.model.prepare()
+        harness.model.openReauthorize(for: accountID)
+        await harness.model.startBrowserLogin()
+        harness.model.browserCallbackInput = "http://localhost:1455/auth/callback?code=test"
+        await harness.model.submitBrowserCallback()
+
+        let account = try XCTUnwrap(harness.model.database.account(id: accountID))
+        XCTAssertEqual(harness.model.accounts.count, 1)
+        XCTAssertEqual(account.displayName, "Cached User")
+        XCTAssertEqual(account.email, "refresh@example.com")
+        XCTAssertEqual(account.planType, "plus")
+        XCTAssertEqual(harness.model.activeAccount?.id, accountID)
+        XCTAssertEqual(harness.model.selectedAccount?.id, accountID)
+        XCTAssertEqual(try harness.credentialStore.load(for: accountID).tokens.refreshToken, "refresh_new")
+        XCTAssertEqual(authFileManager.activatedPayloads.last?.tokens.refreshToken, "refresh_new")
+        XCTAssertFalse(harness.model.isReauthorizingAccount)
+    }
+
+    func testReauthorizeChatGPTAccountRejectsMismatchedAccount() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let otherPayload = makePayload(accountID: "acct_other", refreshToken: "refresh_other")
+        let authFileManager = RecordingAuthFileManager()
+        let oauthClient = MockOAuthClient(
+            refreshResult: .failure(MockError.refreshFailed),
+            browserLoginResult: .success(
+                AuthLoginResult(
+                    payload: otherPayload,
+                    identity: AuthIdentity(
+                        accountID: "acct_other",
+                        displayName: "Other User",
+                        email: "other@example.com",
+                        planType: "team"
+                    )
+                )
+            )
+        )
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: authFileManager,
+            oauthClient: oauthClient,
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false)
+        )
+
+        await harness.model.prepare()
+        harness.model.openReauthorize(for: accountID)
+        await harness.model.startBrowserLogin()
+        harness.model.browserCallbackInput = "http://localhost:1455/auth/callback?code=test"
+        await harness.model.submitBrowserCallback()
+
+        XCTAssertEqual(harness.model.accounts.count, 1)
+        XCTAssertEqual(harness.model.activeAccount?.id, nil)
+        XCTAssertEqual(try harness.credentialStore.load(for: accountID).tokens.refreshToken, "refresh_old")
+        XCTAssertTrue(authFileManager.activatedPayloads.isEmpty)
+        XCTAssertEqual(
+            harness.model.addAccountError,
+            L10n.tr("重新授权账号不匹配。请登录账号 %@。", "Cached User")
+        )
+        XCTAssertTrue(harness.model.isReauthorizingAccount)
+    }
+
+    func testReauthorizeCopilotAccountUpdatesCredentialAndKeepsManagedConfigDirectory() async throws {
+        let accountID = UUID()
+        let copilotAccountID = UUID()
+        let oldCredential = CopilotCredential(
+            configDirectoryName: "managed-copilot-dir",
+            host: "https://github.com",
+            login: "aikilan",
+            githubAccessToken: "github_old",
+            accessToken: "copilot_old",
+            defaultModel: "gpt-4.1",
+            source: .localImport
+        )
+        let newCredential = CopilotCredential(
+            host: "https://github.com",
+            login: "aikilan",
+            githubAccessToken: "github_new",
+            accessToken: "copilot_new",
+            defaultModel: "gpt-4.1",
+            source: .orbitOAuth
+        )
+        let copilotProvider = RecordingCopilotProvider(importResult: .success(newCredential))
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: makePayload(accountID: "acct_cached", refreshToken: "refresh_old"),
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            extraSeeds: [
+                AccountSeed(
+                    account: ManagedAccount(
+                        id: copilotAccountID,
+                        platform: .codex,
+                        accountIdentifier: oldCredential.accountIdentifier,
+                        displayName: "GitHub Copilot • aikilan",
+                        email: oldCredential.credentialSummary,
+                        authKind: .githubCopilot,
+                        providerRule: .githubCopilot,
+                        providerPresetID: nil,
+                        providerDisplayName: "GitHub Copilot",
+                        providerBaseURL: nil,
+                        providerAPIKeyEnvName: nil,
+                        defaultModel: "gpt-4.1",
+                        defaultCLITarget: .codex,
+                        createdAt: Date(),
+                        lastUsedAt: nil,
+                        lastQuotaSnapshotAt: nil,
+                        lastRefreshAt: nil,
+                        planType: nil,
+                        subscriptionDetails: nil,
+                        lastStatusCheckAt: nil,
+                        lastStatusMessage: nil,
+                        lastStatusLevel: nil,
+                        isActive: false
+                    ),
+                    payload: .copilot(oldCredential),
+                    snapshot: nil
+                )
+            ],
+            copilotProvider: copilotProvider
+        )
+
+        await harness.model.prepare()
+        harness.model.openReauthorize(for: copilotAccountID)
+        await harness.model.startCopilotLogin()
+
+        let storedCredential = try XCTUnwrap(try harness.credentialStore.load(for: copilotAccountID).copilotCredential)
+        let account = try XCTUnwrap(harness.model.database.account(id: copilotAccountID))
+        XCTAssertEqual(harness.model.accounts.count, 2)
+        XCTAssertEqual(account.displayName, "GitHub Copilot • aikilan")
+        XCTAssertEqual(harness.model.activeAccount?.id, copilotAccountID)
+        XCTAssertEqual(storedCredential.configDirectoryName, "managed-copilot-dir")
+        XCTAssertEqual(storedCredential.githubAccessToken, "github_new")
+        XCTAssertEqual(storedCredential.accessToken, "copilot_new")
+        XCTAssertEqual(storedCredential.source, .orbitOAuth)
+        XCTAssertFalse(harness.model.isReauthorizingAccount)
+    }
+
+    func testReauthorizeCopilotAccountRejectsMismatchedAccount() async throws {
+        let accountID = UUID()
+        let copilotAccountID = UUID()
+        let oldCredential = CopilotCredential(
+            configDirectoryName: "managed-copilot-dir",
+            host: "https://github.com",
+            login: "aikilan",
+            githubAccessToken: "github_old",
+            accessToken: "copilot_old",
+            defaultModel: "gpt-4.1",
+            source: .localImport
+        )
+        let otherCredential = CopilotCredential(
+            host: "https://github.com",
+            login: "other-user",
+            githubAccessToken: "github_other",
+            accessToken: "copilot_other",
+            defaultModel: "gpt-4.1",
+            source: .orbitOAuth
+        )
+        let challenge = CopilotDeviceLoginChallenge(
+            host: "https://github.com",
+            deviceCode: "device-code",
+            userCode: "ABCD-EFGH",
+            verificationURL: URL(string: "https://github.com/login/device")!,
+            expiresInSeconds: 900,
+            intervalSeconds: 1,
+            defaultModel: "gpt-4.1"
+        )
+        let copilotProvider = RecordingCopilotProvider(
+            importResult: .failure(CopilotProviderError.importUnavailable),
+            startDeviceLoginChallenge: challenge,
+            completeDeviceLoginResult: .success(otherCredential)
+        )
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: makePayload(accountID: "acct_cached", refreshToken: "refresh_old"),
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            extraSeeds: [
+                AccountSeed(
+                    account: ManagedAccount(
+                        id: copilotAccountID,
+                        platform: .codex,
+                        accountIdentifier: oldCredential.accountIdentifier,
+                        displayName: "GitHub Copilot • aikilan",
+                        email: oldCredential.credentialSummary,
+                        authKind: .githubCopilot,
+                        providerRule: .githubCopilot,
+                        providerPresetID: nil,
+                        providerDisplayName: "GitHub Copilot",
+                        providerBaseURL: nil,
+                        providerAPIKeyEnvName: nil,
+                        defaultModel: "gpt-4.1",
+                        defaultCLITarget: .codex,
+                        createdAt: Date(),
+                        lastUsedAt: nil,
+                        lastQuotaSnapshotAt: nil,
+                        lastRefreshAt: nil,
+                        planType: nil,
+                        subscriptionDetails: nil,
+                        lastStatusCheckAt: nil,
+                        lastStatusMessage: nil,
+                        lastStatusLevel: nil,
+                        isActive: false
+                    ),
+                    payload: .copilot(oldCredential),
+                    snapshot: nil
+                )
+            ],
+            copilotProvider: copilotProvider
+        )
+
+        await harness.model.prepare()
+        harness.model.openReauthorize(for: copilotAccountID)
+        await harness.model.startCopilotLogin()
+
+        let storedCredential = try XCTUnwrap(try harness.credentialStore.load(for: copilotAccountID).copilotCredential)
+        XCTAssertEqual(harness.model.accounts.count, 2)
+        XCTAssertEqual(harness.model.activeAccount?.id, nil)
+        XCTAssertEqual(storedCredential.configDirectoryName, "managed-copilot-dir")
+        XCTAssertEqual(storedCredential.githubAccessToken, "github_old")
+        XCTAssertEqual(storedCredential.accessToken, "copilot_old")
+        XCTAssertEqual(
+            harness.model.addAccountError,
+            L10n.tr("重新授权账号不匹配。请登录账号 %@。", "GitHub Copilot • aikilan")
+        )
+        XCTAssertTrue(harness.model.isReauthorizingAccount)
+    }
+
     func testProviderAPIKeyLoginDoesNotWriteCodexAuthForClaudeCompatibleAccount() async throws {
         let accountID = UUID()
         let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
@@ -4515,26 +4776,45 @@ private final class RecordingCopilotCLIInstaller: CopilotCLIInstalling {
 private final class MockOAuthClient: @unchecked Sendable, OAuthClienting {
     let refreshResult: Result<AuthLoginResult, Error>
     let usageResult: Result<UsageRefreshResult, Error>
+    let browserLoginResult: Result<AuthLoginResult, Error>
     private(set) var refreshCallCount = 0
+    private(set) var beginBrowserLoginCallCount = 0
+    private(set) var completeBrowserLoginCallCount = 0
+    private(set) var manualCompleteBrowserLoginCallCount = 0
 
     init(
         refreshResult: Result<AuthLoginResult, Error>,
-        usageResult: Result<UsageRefreshResult, Error> = .failure(MockError.unused)
+        usageResult: Result<UsageRefreshResult, Error> = .failure(MockError.unused),
+        browserLoginResult: Result<AuthLoginResult, Error> = .failure(MockError.unused)
     ) {
         self.refreshResult = refreshResult
         self.usageResult = usageResult
+        self.browserLoginResult = browserLoginResult
     }
 
     func beginBrowserLogin(openURL: @escaping @Sendable (URL) -> Bool) async throws -> BrowserOAuthSession {
-        throw MockError.unused
+        beginBrowserLoginCallCount += 1
+        let callbackURL = URL(string: "http://localhost:1455/auth/callback")!
+        let authorizeURL = URL(string: "https://auth.example.test/oauth")!
+        _ = openURL(authorizeURL)
+        return BrowserOAuthSession(
+            state: "mock-state",
+            codeVerifier: "mock-code-verifier",
+            callbackURL: callbackURL,
+            authorizeURL: authorizeURL,
+            callbackServer: nil,
+            serverErrorDescription: "mock callback unavailable"
+        )
     }
 
     func completeBrowserLogin(session: BrowserOAuthSession) async throws -> AuthLoginResult {
-        throw MockError.unused
+        completeBrowserLoginCallCount += 1
+        return try browserLoginResult.get()
     }
 
     func completeBrowserLogin(session: BrowserOAuthSession, pastedInput: String) async throws -> AuthLoginResult {
-        throw MockError.unused
+        manualCompleteBrowserLoginCallCount += 1
+        return try browserLoginResult.get()
     }
 
     func startDeviceCodeLogin() async throws -> DeviceCodeChallenge {

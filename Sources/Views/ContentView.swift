@@ -234,6 +234,13 @@ struct ContentView: View {
                             }
                             .disabled(model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
                         }
+
+                        if model.canReauthorizeAccount(account) {
+                            Button(L10n.tr("重新登录授权")) {
+                                presentReauthorizeWindow(for: account.id)
+                            }
+                            .disabled(model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
+                        }
                     }
                 }
             }
@@ -423,6 +430,7 @@ struct ContentView: View {
                 authFilePath: authFilePath,
                 onRename: { model.renameAccount(account.id, to: $0) },
                 onEditProvider: { presentEditProviderWindow(for: account.id) },
+                onReauthorize: { presentReauthorizeWindow(for: account.id) },
                 onRefreshStatus: { Task { await model.refreshAccountStatus(account) } },
                 onSwitch: { Task { @MainActor in await model.switchToAccount(account) } },
                 onDelete: { model.requestDeleteAccount(account.id) }
@@ -468,6 +476,11 @@ struct ContentView: View {
 
     private func presentEditProviderWindow(for accountID: UUID) {
         model.openEditProvider(for: accountID)
+        presentWindow(id: "add-account")
+    }
+
+    private func presentReauthorizeWindow(for accountID: UUID) {
+        model.openReauthorize(for: accountID)
         presentWindow(id: "add-account")
     }
 
@@ -736,6 +749,7 @@ private struct AccountDetailView: View {
     let authFilePath: String
     let onRename: (String) -> Void
     let onEditProvider: () -> Void
+    let onReauthorize: () -> Void
     let onRefreshStatus: () -> Void
     let onSwitch: () -> Void
     let onDelete: () -> Void
@@ -1041,6 +1055,15 @@ private struct AccountDetailView: View {
                     if model.canEditProviderAccount(account) {
                         Button(L10n.tr("编辑供应商")) {
                             onEditProvider()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(model.isRefreshingStatus(for: account.id) || model.isSwitchInProgress)
+                    }
+
+                    if model.canReauthorizeAccount(account) {
+                        Button(L10n.tr("重新登录授权")) {
+                            onReauthorize()
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)

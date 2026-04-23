@@ -278,10 +278,15 @@
 "重启 Codex" = "Restart Codex";
 "重启 Codex 失败：%@" = "Failed to restart Codex: %@";
 "重新打开授权页面" = "Reopen Authorization Page";
+"重新登录 GitHub Copilot" = "Re-sign in to GitHub Copilot";
+"重新登录授权" = "Reauthorize Sign-in";
+"重新授权账号不匹配。请登录账号 %@。" = "The reauthorized account does not match. Please sign in to account %@.";
 "新增一个 API Key Provider 账号。用户后续只需要关心打开 Codex CLI 还是 Claude Code。" = "Add an API Key Provider account. After that, users only need to choose whether to open Codex CLI or Claude Code.";
 "正在保存供应商修改。" = "Saving Provider changes.";
+"正在为账号 %@ 重新登录授权；完成后会更新本地凭据并激活该账号。" = "Reauthorizing account %@. When complete, local credentials will be updated and the account will be activated.";
 "供应商名称" = "Provider Name";
 "保存并激活供应商" = "Save and Activate Provider";
+"开始重新授权" = "Start Reauthorization";
 "显式供应商" = "Explicit Provider";
 "已确认供应商账号 %@ 的本地凭据可用。" = "Confirmed the local credential for Provider account %@ is available.";
 "当前供应商不支持 OpenAI Responses API，无法用于启动 Codex CLI 或 Claude Code。" = "The current Provider does not support the OpenAI Responses API, so it cannot launch Codex CLI or Claude Code.";
@@ -389,6 +394,9 @@
 "当前账号会按保存的 Claude 兼容 provider、模型和 API Key 启动。" = "This account launches with the saved Claude-compatible provider, model, and API key.";
 "当前账号会直接复用已保存的本地 Claude Profile。" = "This account directly reuses the saved local Claude Profile.";
 "点击底部按钮开始浏览器登录。" = "Use the button below to start browser sign-in.";
+"点击底部按钮开始重新授权。" = "Use the button below to start reauthorization.";
+"当前账号不支持重新登录授权。" = "This account does not support reauthorization.";
+"已为账号 %@ 重新登录授权并激活。" = "Reauthorized and activated account %@.";
 "安装 GitHub Copilot CLI" = "Install GitHub Copilot CLI";
 "安装" = "Install";
 "当前机器未安装可用的 `copilot` CLI。是否需要 Orbit 帮你通过 npm 安装？" = "No usable `copilot` CLI is installed on this machine. Do you want Orbit to install it with npm?";

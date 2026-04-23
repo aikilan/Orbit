@@ -73,7 +73,14 @@ struct AddAccountSheet: View {
 
     @ViewBuilder
     private var modeSelectorSection: some View {
-        if model.isEditingProviderAccount {
+        if model.isReauthorizingAccount {
+            Text(model.selectedAddAccountMessage)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .orbitSurface()
+        } else if model.isEditingProviderAccount {
             Text(L10n.tr("仅支持编辑 Provider API Key 账号；规则已锁定，API Key 留空表示继续使用当前凭据。"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -149,7 +156,7 @@ struct AddAccountSheet: View {
                     .disabled(model.isAuthenticating)
                 }
             } else {
-                Text(L10n.tr("点击底部按钮开始浏览器登录。"))
+                Text(model.isReauthorizingAccount ? L10n.tr("点击底部按钮开始重新授权。") : L10n.tr("点击底部按钮开始浏览器登录。"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -262,8 +269,10 @@ struct AddAccountSheet: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
-            TextField(L10n.tr("显示名称（可选）"), text: $model.apiKeyDisplayName)
-                .textFieldStyle(.roundedBorder)
+            if !model.isReauthorizingAccount {
+                TextField(L10n.tr("显示名称（可选）"), text: $model.apiKeyDisplayName)
+                    .textFieldStyle(.roundedBorder)
+            }
 
             TextField(L10n.tr("GitHub Host"), text: $model.copilotHostInput)
                 .textFieldStyle(.roundedBorder)
