@@ -137,6 +137,29 @@ protocol CopilotSessionQueueImporting: Sendable {
     func importSession(_ candidate: CopilotSessionCandidate) throws -> CopilotSessionQueueItem
 }
 
+struct MaterializedCodexThread: Equatable, Sendable {
+    let id: String
+    let path: String?
+}
+
+struct ResolvedCodexLocalThreadMaterializationContext: Equatable, Sendable {
+    let accountID: UUID
+    let workingDirectoryURL: URL
+    let codexHomeURL: URL?
+    let authPayload: CodexAuthPayload?
+    let modelCatalogSnapshot: ResolvedCodexModelCatalogSnapshot?
+    let configFileContents: String?
+    let environmentVariables: [String: String]
+}
+
+protocol CodexLocalThreadMaterializing: Sendable {
+    func materializeCopilotSessionQueueItem(
+        _ item: CopilotSessionQueueItem,
+        context: ResolvedCodexLocalThreadMaterializationContext,
+        developerInstructions: String
+    ) async throws -> MaterializedCodexThread
+}
+
 struct PreparedCopilotResponsesBridge: Equatable, Sendable {
     let baseURL: String
     let apiKeyEnvName: String

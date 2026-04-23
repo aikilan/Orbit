@@ -4546,6 +4546,49 @@ final class AppViewModelTests: XCTestCase {
         )
     }
 
+    func testCopilotSessionManualImportMaterializesCodexThreadWhenAccountIsAvailable() async throws {
+        let accountID = UUID()
+        let payload = makePayload(accountID: "acct_copilot_queue_materialize_import", refreshToken: "refresh_copilot_queue_materialize_import")
+        let authFileManager = RecordingAuthFileManager()
+        authFileManager.currentAuth = payload
+        let workspaceURL = makeWorkingDirectoryURL("next-erp-h5-materialize-import")
+        let candidate = makeCopilotSessionCandidate(sessionID: "session-materialize-import", workspaceURL: workspaceURL)
+        let item = makeCopilotSessionQueueItem(from: candidate)
+        let importer = RecordingCopilotSessionImporter(
+            candidatesByWorkspacePath: [workspaceURL.standardizedFileURL.path: [candidate]],
+            importedItemsByCandidateID: [candidate.id: item]
+        )
+        let materializer = RecordingCodexLocalThreadMaterializer()
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: payload,
+            authFileManager: authFileManager,
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            activeAccountID: accountID,
+            codexLocalThreadMaterializer: materializer,
+            copilotSessionImporter: importer
+        )
+
+        await harness.model.prepare()
+        await harness.model.loadCopilotSessionCandidates(for: workspaceURL)
+        await harness.model.importCopilotSession(candidate)
+
+        let queuedItem = try XCTUnwrap(harness.model.database.copilotSessionQueueItems.first)
+        XCTAssertEqual(materializer.materializeCallCount, 1)
+        XCTAssertEqual(materializer.lastContext?.accountID, accountID)
+        XCTAssertEqual(materializer.lastContext?.workingDirectoryURL.standardizedFileURL.path, workspaceURL.standardizedFileURL.path)
+        XCTAssertNil(materializer.lastContext?.codexHomeURL)
+        XCTAssertTrue(materializer.lastDeveloperInstructions?.contains(item.handoffFilePath) == true)
+        XCTAssertEqual(queuedItem.status, .sent)
+        XCTAssertEqual(queuedItem.codexThreadID, materializer.result.id)
+        XCTAssertEqual(queuedItem.codexThreadPath, materializer.result.path)
+        XCTAssertEqual(queuedItem.codexThreadAccountID, accountID)
+        XCTAssertNil(queuedItem.codexThreadCodexHomePath)
+        XCTAssertNotNil(queuedItem.materializedAt)
+        XCTAssertEqual(queuedItem.lastExecutionTarget, .desktop)
+    }
+
     func testCopilotSessionMonitorOnlyImportsNewSessionsFromKnownDirectories() async throws {
         let accountID = UUID()
         let payload = makePayload(accountID: "acct_copilot_queue_monitor", refreshToken: "refresh_copilot_queue_monitor")
@@ -4637,6 +4680,73 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(harness.model.database.copilotSessionQueueItems.first?.lastExecutionTarget, .cli)
     }
 
+    func testExecuteCopilotSessionQueueItemInDesktopMaterializesThread() async throws {
+        let accountID = UUID()
+        let payload = makePayload(accountID: "acct_copilot_queue_desktop_materialize", refreshToken: "refresh_copilot_queue_desktop_materialize")
+        let authFileManager = RecordingAuthFileManager()
+        authFileManager.currentAuth = payload
+        let workspaceURL = makeWorkingDirectoryURL("next-erp-h5-desktop-materialize")
+        let candidate = makeCopilotSessionCandidate(sessionID: "session-desktop-materialize", workspaceURL: workspaceURL)
+        let item = makeCopilotSessionQueueItem(from: candidate)
+        let importer = RecordingCopilotSessionImporter(
+            candidatesByWorkspacePath: [workspaceURL.standardizedFileURL.path: [candidate]],
+            importedItemsByCandidateID: [candidate.id: item]
+        )
+        let materializer = RecordingCodexLocalThreadMaterializer()
+        materializer.error = MockError.unused
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: payload,
+            authFileManager: authFileManager,
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            activeAccountID: accountID,
+            codexLocalThreadMaterializer: materializer,
+            copilotSessionImporter: importer
+        )
+
+        await harness.model.prepare()
+        await harness.model.loadCopilotSessionCandidates(for: workspaceURL)
+        await harness.model.importCopilotSession(candidate)
+        let queuedItem = try XCTUnwrap(harness.model.database.copilotSessionQueueItems.first)
+        XCTAssertEqual(queuedItem.status, .pending)
+
+        materializer.error = nil
+        materializer.materializeCallCount = 0
+        await harness.model.executeCopilotSessionQueueItemInDesktop(queuedItem)
+
+        XCTAssertEqual(materializer.materializeCallCount, 1)
+        XCTAssertEqual(harness.model.database.copilotSessionQueueItems.first?.status, .sent)
+        XCTAssertEqual(harness.model.database.copilotSessionQueueItems.first?.codexThreadID, materializer.result.id)
+        XCTAssertEqual(harness.model.database.copilotSessionQueueItems.first?.lastExecutionTarget, .desktop)
+    }
+
+    func testExecuteCopilotSessionQueueItemInDesktopOpensMaterializedThread() async throws {
+        let accountID = UUID()
+        let payload = makePayload(accountID: "acct_copilot_queue_desktop_open", refreshToken: "refresh_copilot_queue_desktop_open")
+        let authFileManager = RecordingAuthFileManager()
+        authFileManager.currentAuth = payload
+        let workspaceURL = makeWorkingDirectoryURL("next-erp-h5-desktop-open")
+        let candidate = makeCopilotSessionCandidate(sessionID: "session-desktop-open", workspaceURL: workspaceURL)
+        var item = makeCopilotSessionQueueItem(from: candidate)
+        item.codexThreadID = "019db9c1-1111-7000-8000-000000000001"
+        var openedURL: URL?
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: payload,
+            authFileManager: authFileManager,
+            oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            activeAccountID: accountID,
+            openExternalURL: { openedURL = $0 }
+        )
+
+        await harness.model.prepare()
+        await harness.model.executeCopilotSessionQueueItemInDesktop(item)
+
+        XCTAssertEqual(openedURL?.absoluteString, "codex://threads/019db9c1-1111-7000-8000-000000000001")
+    }
+
     func testDeleteCopilotSessionQueueItemRemovesHandoffDirectory() async throws {
         let accountID = UUID()
         let payload = makePayload(accountID: "acct_copilot_queue_delete", refreshToken: "refresh_copilot_queue_delete")
@@ -4715,7 +4825,7 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertTrue(fileManager.fileExists(atPath: newDirectoryURL.path))
     }
 
-    func testCopilotSessionDesktopAvailabilityRejectsClaudeCompatibleAccount() async throws {
+    func testCopilotSessionDesktopAvailabilityUsesCodexSupport() async throws {
         let accountID = UUID()
         let payload = makePayload(accountID: "acct_copilot_queue_desktop", refreshToken: "refresh_copilot_queue_desktop")
         let authFileManager = RecordingAuthFileManager()
@@ -4745,7 +4855,7 @@ final class AppViewModelTests: XCTestCase {
         let activeAccount = try XCTUnwrap(harness.model.selectedAccount)
 
         XCTAssertTrue(claudeAccount.supportsCodexCLI)
-        XCTAssertFalse(harness.model.canSendCopilotSessionQueueItemToDesktop(for: claudeAccount))
+        XCTAssertTrue(harness.model.canSendCopilotSessionQueueItemToDesktop(for: claudeAccount))
         XCTAssertTrue(harness.model.canSendCopilotSessionQueueItemToDesktop(for: activeAccount))
     }
 
@@ -4769,6 +4879,7 @@ final class AppViewModelTests: XCTestCase {
         cliEnvironmentResolver: any CLIEnvironmentResolving = CLIEnvironmentResolver(),
         cliLauncher: any CodexCLILaunching = RecordingCodexCLILauncher(),
         claudeCLILauncher: any ClaudeCLILaunching = RecordingClaudeCLILauncher(),
+        codexLocalThreadMaterializer: any CodexLocalThreadMaterializing = FailingCodexLocalThreadMaterializer(),
         claudePatchedRuntimeManager: any ClaudePatchedRuntimeManaging = RecordingClaudePatchedRuntimeManager(),
         appSupportPathRepairer: any AppSupportPathRepairing = NoopAppSupportPathRepairer(),
         codexOAuthClaudeBridgeManager: any CodexOAuthClaudeBridgeManaging = RecordingCodexOAuthClaudeBridgeManager(),
@@ -4877,6 +4988,7 @@ final class AppViewModelTests: XCTestCase {
             cliEnvironmentResolver: cliEnvironmentResolver,
             cliLauncher: cliLauncher,
             claudeCLILauncher: claudeCLILauncher,
+            codexLocalThreadMaterializer: codexLocalThreadMaterializer,
             claudePatchedRuntimeManager: claudePatchedRuntimeManager,
             appSupportPathRepairer: appSupportPathRepairer,
             codexOAuthClaudeBridgeManager: codexOAuthClaudeBridgeManager,
@@ -5605,6 +5717,40 @@ private final class RecordingCodexCLILauncher: CodexCLILaunching {
         }
         launchCallCount += 1
         lastContext = context
+    }
+}
+
+private struct FailingCodexLocalThreadMaterializer: CodexLocalThreadMaterializing {
+    func materializeCopilotSessionQueueItem(
+        _ item: CopilotSessionQueueItem,
+        context: ResolvedCodexLocalThreadMaterializationContext,
+        developerInstructions: String
+    ) async throws -> MaterializedCodexThread {
+        throw MockError.unused
+    }
+}
+
+private final class RecordingCodexLocalThreadMaterializer: @unchecked Sendable, CodexLocalThreadMaterializing {
+    var materializeCallCount = 0
+    var lastItem: CopilotSessionQueueItem?
+    var lastContext: ResolvedCodexLocalThreadMaterializationContext?
+    var lastDeveloperInstructions: String?
+    var result = MaterializedCodexThread(id: "019db9c1-0000-7000-8000-000000000001", path: "/tmp/codex-thread.jsonl")
+    var error: Error?
+
+    func materializeCopilotSessionQueueItem(
+        _ item: CopilotSessionQueueItem,
+        context: ResolvedCodexLocalThreadMaterializationContext,
+        developerInstructions: String
+    ) async throws -> MaterializedCodexThread {
+        if let error {
+            throw error
+        }
+        materializeCallCount += 1
+        lastItem = item
+        lastContext = context
+        lastDeveloperInstructions = developerInstructions
+        return result
     }
 }
 

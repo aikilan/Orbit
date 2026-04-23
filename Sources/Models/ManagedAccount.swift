@@ -536,6 +536,24 @@ struct AppDatabase: Codable, Sendable {
         copilotSessionQueueItems[index].lastExecutionTarget = target
     }
 
+    mutating func markCopilotSessionQueueItemMaterialized(
+        id: UUID,
+        accountID: UUID,
+        codexHomeURL: URL?,
+        threadID: String,
+        threadPath: String?
+    ) {
+        guard let index = copilotSessionQueueItems.firstIndex(where: { $0.id == id }) else { return }
+        copilotSessionQueueItems[index].status = .sent
+        copilotSessionQueueItems[index].codexThreadID = threadID
+        copilotSessionQueueItems[index].codexThreadPath = threadPath
+        copilotSessionQueueItems[index].codexThreadAccountID = accountID
+        copilotSessionQueueItems[index].codexThreadCodexHomePath = codexHomeURL?.path
+        copilotSessionQueueItems[index].materializedAt = Date()
+        copilotSessionQueueItems[index].lastSentAt = Date()
+        copilotSessionQueueItems[index].lastExecutionTarget = .desktop
+    }
+
     mutating func setCopilotSessionAutoMonitorEnabled(_ isEnabled: Bool) {
         copilotSessionSyncSettings.isAutoMonitorEnabled = isEnabled
     }

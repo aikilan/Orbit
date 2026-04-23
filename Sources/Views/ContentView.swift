@@ -1148,7 +1148,7 @@ private struct AccountDetailView: View {
                         CopilotSessionQueueCard(
                             item: item,
                             isExecuting: model.executingCopilotSessionQueueItemID == item.id,
-                            isDesktopDisabled: !model.canSendCopilotSessionQueueItemToDesktop(for: account),
+                            isDesktopDisabled: item.codexThreadID == nil && !model.canSendCopilotSessionQueueItemToDesktop(for: account),
                             isCLIDisabled: !account.supportsCodexCLI,
                             onRunCLI: {
                                 Task { await model.executeCopilotSessionQueueItemInCLI(item) }
@@ -1972,11 +1972,15 @@ private struct CopilotSessionQueueCard: View {
                 Button {
                     onRunDesktop()
                 } label: {
-                    Label(L10n.tr("Codex.app"), systemImage: "macwindow")
+                    if item.codexThreadID == nil {
+                        Label(L10n.tr("同步到 Codex"), systemImage: "arrow.triangle.2.circlepath")
+                    } else {
+                        Label(L10n.tr("打开线程"), systemImage: "macwindow")
+                    }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(isExecuting || isDesktopDisabled || item.status != .pending)
+                .disabled(isExecuting || isDesktopDisabled || (item.codexThreadID == nil && item.status != .pending))
 
                 Button {
                     onArchive()

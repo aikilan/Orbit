@@ -25,6 +25,11 @@ struct CopilotSessionQueueItem: Identifiable, Codable, Hashable, Sendable {
     var handoffFilePath: String
     var rawSessionFilePath: String?
     var editingStateFilePath: String?
+    var codexThreadID: String?
+    var codexThreadPath: String?
+    var codexThreadAccountID: UUID?
+    var codexThreadCodexHomePath: String?
+    var materializedAt: Date?
     var lastSentAt: Date?
     var lastExecutionTarget: CopilotSessionQueueExecutionTarget?
 }

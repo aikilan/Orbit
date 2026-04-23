@@ -118,6 +118,13 @@ final class CopilotSessionQueueImporterTests: XCTestCase {
         database.upsertCopilotSessionQueueItem(item)
         database.setCopilotSessionAutoMonitorEnabled(true)
         database.markCopilotSessionQueueItemSent(id: item.id, target: .cli)
+        database.markCopilotSessionQueueItemMaterialized(
+            id: item.id,
+            accountID: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            codexHomeURL: URL(fileURLWithPath: "/tmp/codex-home", isDirectory: true),
+            threadID: "019db9c1-2222-7000-8000-000000000001",
+            threadPath: "/tmp/thread.jsonl"
+        )
 
         let data = try JSONEncoder().encode(database)
         let decoded = try JSONDecoder().decode(AppDatabase.self, from: data)
@@ -125,7 +132,12 @@ final class CopilotSessionQueueImporterTests: XCTestCase {
         XCTAssertEqual(decoded.version, AppDatabase.currentVersion)
         XCTAssertEqual(decoded.copilotSessionQueueItems.count, 1)
         XCTAssertEqual(decoded.copilotSessionQueueItems[0].status, .sent)
-        XCTAssertEqual(decoded.copilotSessionQueueItems[0].lastExecutionTarget, .cli)
+        XCTAssertEqual(decoded.copilotSessionQueueItems[0].lastExecutionTarget, .desktop)
+        XCTAssertEqual(decoded.copilotSessionQueueItems[0].codexThreadID, "019db9c1-2222-7000-8000-000000000001")
+        XCTAssertEqual(decoded.copilotSessionQueueItems[0].codexThreadPath, "/tmp/thread.jsonl")
+        XCTAssertEqual(decoded.copilotSessionQueueItems[0].codexThreadAccountID?.uuidString, "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")
+        XCTAssertEqual(decoded.copilotSessionQueueItems[0].codexThreadCodexHomePath, "/tmp/codex-home")
+        XCTAssertNotNil(decoded.copilotSessionQueueItems[0].materializedAt)
         XCTAssertEqual(decoded.copilotSessionSyncSettings.monitoredWorkspacePaths, ["/tmp/next-erp-h5"])
         XCTAssertTrue(decoded.copilotSessionSyncSettings.isAutoMonitorEnabled)
     }

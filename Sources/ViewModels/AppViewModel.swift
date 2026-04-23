@@ -187,6 +187,7 @@ final class AppViewModel: ObservableObject {
     private let cliEnvironmentResolver: any CLIEnvironmentResolving
     private let codexCLILauncher: any CodexCLILaunching
     private let claudeCLILauncher: any ClaudeCLILaunching
+    private let codexLocalThreadMaterializer: any CodexLocalThreadMaterializing
     private let claudePatchedRuntimeManager: any ClaudePatchedRuntimeManaging
     private let appSupportPathRepairer: any AppSupportPathRepairing
     private let codexOAuthClaudeBridgeManager: any CodexOAuthClaudeBridgeManaging
@@ -231,6 +232,7 @@ final class AppViewModel: ObservableObject {
         cliEnvironmentResolver: any CLIEnvironmentResolving = CLIEnvironmentResolver(),
         codexCLILauncher: any CodexCLILaunching = CodexCLILauncher(),
         claudeCLILauncher: any ClaudeCLILaunching = ClaudeCLILauncher(),
+        codexLocalThreadMaterializer: any CodexLocalThreadMaterializing = CodexLocalThreadMaterializer(),
         claudePatchedRuntimeManager: any ClaudePatchedRuntimeManaging = ClaudePatchedRuntimeManager(),
         appSupportPathRepairer: any AppSupportPathRepairing = AppSupportPathRepairer(),
         codexOAuthClaudeBridgeManager: any CodexOAuthClaudeBridgeManaging = CodexOAuthClaudeBridgeManager(),
@@ -269,6 +271,7 @@ final class AppViewModel: ObservableObject {
         self.cliEnvironmentResolver = cliEnvironmentResolver
         self.codexCLILauncher = codexCLILauncher
         self.claudeCLILauncher = claudeCLILauncher
+        self.codexLocalThreadMaterializer = codexLocalThreadMaterializer
         self.claudePatchedRuntimeManager = claudePatchedRuntimeManager
         self.appSupportPathRepairer = appSupportPathRepairer
         self.codexOAuthClaudeBridgeManager = codexOAuthClaudeBridgeManager
@@ -1005,8 +1008,17 @@ final class AppViewModel: ObservableObject {
             let item = try copilotSessionImporter.importSession(candidate)
             let replacedItem = database.upsertCopilotSessionQueueItem(item)
             removeCopilotSessionHandoffDirectoryIfNeeded(for: replacedItem, preserving: item)
+            if let account = selectedAccount, account.supportsCodexCLI {
+                do {
+                    _ = try await materializeCopilotSessionQueueItem(item, using: account)
+                    pushBanner(level: .info, message: L10n.tr("已导入 Copilot Session，并同步到 Codex 队列：%@", item.title))
+                } catch {
+                    pushBanner(level: .error, message: L10n.tr("已导入 Copilot Session，但同步到 Codex 队列失败：%@", error.localizedDescription))
+                }
+            } else {
+                pushBanner(level: .info, message: L10n.tr("已导入 Copilot Session：%@", item.title))
+            }
             try await persistDatabase()
-            pushBanner(level: .info, message: L10n.tr("已导入 Copilot Session：%@", item.title))
         } catch {
             copilotSessionImportError = error.localizedDescription
             pushBanner(level: .error, message: L10n.tr("导入 Copilot Session 失败：%@", error.localizedDescription))
@@ -1043,6 +1055,7 @@ final class AppViewModel: ObservableObject {
         guard !monitoredPaths.isEmpty else { return }
 
         var didImport = false
+        let materializationAccount = selectedAccount
         for workspacePath in monitoredPaths {
             do {
                 let candidates = try copilotSessionImporter.sessions(
@@ -1051,6 +1064,13 @@ final class AppViewModel: ObservableObject {
                 for candidate in candidates where !hasCopilotSessionQueueItem(for: candidate) {
                     let item = try copilotSessionImporter.importSession(candidate)
                     database.upsertCopilotSessionQueueItem(item)
+                    if let account = materializationAccount, account.supportsCodexCLI {
+                        do {
+                            _ = try await materializeCopilotSessionQueueItem(item, using: account)
+                        } catch {
+                            database.appendLog(level: .warning, message: L10n.tr("自动同步 Copilot Session 到 Codex 队列失败：%@", error.localizedDescription))
+                        }
+                    }
                     didImport = true
                 }
             } catch {
@@ -1101,13 +1121,13 @@ final class AppViewModel: ObservableObject {
     }
 
     func executeCopilotSessionQueueItemInDesktop(_ item: CopilotSessionQueueItem) async {
+        if item.codexThreadID != nil {
+            await openMaterializedCopilotSessionQueueItem(item)
+            return
+        }
         guard executingCopilotSessionQueueItemID == nil else { return }
         guard let account = selectedAccount, account.supportsCodexCLI else {
             pushBanner(level: .error, message: L10n.tr("当前选中账号不支持 Codex。"))
-            return
-        }
-        guard let deeplinkURL = copilotSessionDeeplinkURL(for: item) else {
-            pushBanner(level: .error, message: L10n.tr("生成 Codex.app deeplink 失败。"))
             return
         }
 
@@ -1119,40 +1139,22 @@ final class AppViewModel: ObservableObject {
         }
 
         do {
-            if account.providerRule == .chatgptOAuth, account.isActive {
-                openExternalURL(deeplinkURL)
-            } else {
-                guard canLaunchIsolatedCodex(for: account) else {
-                    throw CLIEnvironmentResolverError.codexCLINotSupported
-                }
-                let context = try await resolveCodexDesktopLaunchContext(for: account)
-                let onTermination = beginTrackingIsolatedInstance(for: account.id)
-                _ = try instanceLauncher.launchIsolatedInstance(
-                    context: context,
-                    deeplinkURL: deeplinkURL,
-                    onTermination: onTermination
-                )
-            }
-            database.markCopilotSessionQueueItemSent(id: item.id, target: .desktop)
+            let thread = try await materializeCopilotSessionQueueItem(item, using: account)
             try await persistDatabase()
-            pushBanner(level: .info, message: L10n.tr("已把 Copilot Session 发送给 Codex.app。"))
+            pushBanner(level: .info, message: L10n.tr("已在 Codex 队列创建线程：%@", thread.id))
         } catch {
-            stopTrackingIsolatedInstance(for: account.id)
             if requestCopilotCLIInstallIfUnavailable(error, retry: { [weak self, itemID = item.id] in
                 guard let self, let latestItem = self.database.copilotSessionQueueItems.first(where: { $0.id == itemID }) else { return }
                 await self.executeCopilotSessionQueueItemInDesktop(latestItem)
             }) {
                 return
             }
-            pushBanner(level: .error, message: L10n.tr("发送 Copilot Session 到 Codex.app 失败：%@", error.localizedDescription))
+            pushBanner(level: .error, message: L10n.tr("同步 Copilot Session 到 Codex 队列失败：%@", error.localizedDescription))
         }
     }
 
     func canSendCopilotSessionQueueItemToDesktop(for account: ManagedAccount) -> Bool {
-        if account.providerRule == .chatgptOAuth, account.isActive {
-            return true
-        }
-        return canLaunchIsolatedCodex(for: account)
+        account.supportsCodexCLI
     }
 
     private func startCopilotSessionMonitorIfNeeded() {
@@ -1216,16 +1218,113 @@ final class AppViewModel: ObservableObject {
         """
     }
 
-    private func copilotSessionDeeplinkURL(for item: CopilotSessionQueueItem) -> URL? {
+    private func copilotSessionDeveloperInstructions(for item: CopilotSessionQueueItem) -> String {
+        """
+        这是从 VSCode Copilot Chat 导入的同目录接力任务。
+
+        Workspace: \(item.workspacePath)
+        Handoff: \(item.handoffFilePath)
+
+        用户开始这个线程后，请先完整阅读 handoff.md 里的原始 session JSONL、编辑状态和解析后的对话，再基于上下文继续完成任务。
+        """
+    }
+
+    private func codexThreadURL(for item: CopilotSessionQueueItem) -> URL? {
+        guard let threadID = item.codexThreadID else { return nil }
         var components = URLComponents()
         components.scheme = "codex"
-        components.host = "new"
-        components.queryItems = [
-            URLQueryItem(name: "path", value: item.workspacePath),
-            URLQueryItem(name: "prompt", value: copilotSessionHandoffPrompt(for: item)),
-            URLQueryItem(name: "originUrl", value: "orbit://copilot-session/\(item.id.uuidString)"),
-        ]
+        components.host = "threads"
+        components.path = "/" + threadID
         return components.url
+    }
+
+    private func materializeCopilotSessionQueueItem(
+        _ item: CopilotSessionQueueItem,
+        using account: ManagedAccount
+    ) async throws -> MaterializedCodexThread {
+        let workspaceURL = URL(fileURLWithPath: item.workspacePath, isDirectory: true)
+        let context = try await resolveCodexLocalThreadMaterializationContext(
+            for: account,
+            workingDirectoryURL: workspaceURL
+        )
+        let thread = try await codexLocalThreadMaterializer.materializeCopilotSessionQueueItem(
+            item,
+            context: context,
+            developerInstructions: copilotSessionDeveloperInstructions(for: item)
+        )
+        database.markCopilotSessionQueueItemMaterialized(
+            id: item.id,
+            accountID: account.id,
+            codexHomeURL: context.codexHomeURL,
+            threadID: thread.id,
+            threadPath: thread.path
+        )
+        database.rememberCLILaunch(workspaceURL, target: .codex, for: account.id)
+        return thread
+    }
+
+    private func openMaterializedCopilotSessionQueueItem(_ item: CopilotSessionQueueItem) async {
+        guard let deeplinkURL = codexThreadURL(for: item) else {
+            pushBanner(level: .error, message: L10n.tr("生成 Codex 线程链接失败。"))
+            return
+        }
+
+        guard item.codexThreadCodexHomePath != nil else {
+            openExternalURL(deeplinkURL)
+            return
+        }
+
+        let account = item.codexThreadAccountID.flatMap { database.account(id: $0) } ?? selectedAccount
+        guard let account else {
+            pushBanner(level: .error, message: L10n.tr("找不到创建该 Codex 线程的账号。"))
+            return
+        }
+        guard canLaunchIsolatedCodex(for: account) else {
+            pushBanner(level: .error, message: L10n.tr("该 Codex 线程属于独立实例；当前无法再次启动该账号的独立 Codex。"))
+            return
+        }
+
+        do {
+            let context = try await resolveCodexDesktopLaunchContext(for: account)
+            let onTermination = beginTrackingIsolatedInstance(for: account.id)
+            _ = try instanceLauncher.launchIsolatedInstance(
+                context: context,
+                deeplinkURL: deeplinkURL,
+                onTermination: onTermination
+            )
+        } catch {
+            stopTrackingIsolatedInstance(for: account.id)
+            pushBanner(level: .error, message: L10n.tr("打开 Codex 线程失败：%@", error.localizedDescription))
+        }
+    }
+
+    private func resolveCodexLocalThreadMaterializationContext(
+        for account: ManagedAccount,
+        workingDirectoryURL: URL
+    ) async throws -> ResolvedCodexLocalThreadMaterializationContext {
+        if account.providerRule == .chatgptOAuth, account.isActive {
+            let context = try await resolveCodexLaunchContext(for: account, workingDirectoryURL: workingDirectoryURL)
+            return ResolvedCodexLocalThreadMaterializationContext(
+                accountID: context.accountID,
+                workingDirectoryURL: context.workingDirectoryURL,
+                codexHomeURL: nil,
+                authPayload: nil,
+                modelCatalogSnapshot: nil,
+                configFileContents: nil,
+                environmentVariables: context.environmentVariables
+            )
+        }
+
+        let context = try await resolveCodexDesktopLaunchContext(for: account)
+        return ResolvedCodexLocalThreadMaterializationContext(
+            accountID: context.accountID,
+            workingDirectoryURL: workingDirectoryURL,
+            codexHomeURL: context.codexHomeURL,
+            authPayload: context.authPayload,
+            modelCatalogSnapshot: context.modelCatalogSnapshot,
+            configFileContents: context.configFileContents,
+            environmentVariables: context.environmentVariables
+        )
     }
 
     private func resolveCodexDesktopLaunchContext(for account: ManagedAccount) async throws -> ResolvedCodexDesktopLaunchContext {
@@ -1243,7 +1342,9 @@ final class AppViewModel: ObservableObject {
             let launchState = try await resolvedCopilotLaunchState(for: account)
             copilotCredential = launchState.credential
             copilotStatus = launchState.status
-        case .claudeCompatible, .claudeProfile:
+        case .claudeCompatible:
+            providerCredential = try latestCredential(for: account).providerAPIKeyCredential
+        case .claudeProfile:
             throw CLIEnvironmentResolverError.codexCLINotSupported
         }
 

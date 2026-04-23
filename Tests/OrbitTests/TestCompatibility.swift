@@ -158,6 +158,16 @@ private struct NoopCopilotCLIInstaller: CopilotCLIInstalling {
     func installCLI() async throws {}
 }
 
+private struct NoopCodexLocalThreadMaterializer: CodexLocalThreadMaterializing {
+    func materializeCopilotSessionQueueItem(
+        _ item: CopilotSessionQueueItem,
+        context: ResolvedCodexLocalThreadMaterializationContext,
+        developerInstructions: String
+    ) async throws -> MaterializedCodexThread {
+        throw NSError(domain: "test", code: 1)
+    }
+}
+
 private struct NoopCopilotStatusRefresher: CopilotStatusRefreshing {
     func fetchStatus(using credential: CopilotCredential) async throws -> CopilotAccountStatus {
         CopilotAccountStatus(availableModels: [], currentModel: nil, quotaSnapshot: nil)
@@ -315,6 +325,7 @@ extension AppViewModel {
         cliEnvironmentResolver: any CLIEnvironmentResolving = CLIEnvironmentResolver(),
         cliLauncher: any CodexCLILaunching = CodexCLILauncher(),
         claudeCLILauncher: any ClaudeCLILaunching = NoopClaudeCLILauncher(),
+        codexLocalThreadMaterializer: any CodexLocalThreadMaterializing = NoopCodexLocalThreadMaterializer(),
         claudePatchedRuntimeManager: any ClaudePatchedRuntimeManaging = NoopClaudePatchedRuntimeManager(),
         appSupportPathRepairer: any AppSupportPathRepairing = NoopAppSupportPathRepairer(),
         codexOAuthClaudeBridgeManager: any CodexOAuthClaudeBridgeManaging = NoopCodexOAuthClaudeBridgeManager(),
@@ -350,6 +361,7 @@ extension AppViewModel {
             cliEnvironmentResolver: cliEnvironmentResolver,
             codexCLILauncher: cliLauncher,
             claudeCLILauncher: claudeCLILauncher,
+            codexLocalThreadMaterializer: codexLocalThreadMaterializer,
             claudePatchedRuntimeManager: claudePatchedRuntimeManager,
             appSupportPathRepairer: appSupportPathRepairer,
             codexOAuthClaudeBridgeManager: codexOAuthClaudeBridgeManager,
