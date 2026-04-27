@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppRuntime.shared.sessionLogger?.info("activation_policy.set", metadata: ["policy": "regular"])
         AppIconArtwork.applyApplicationIcon()
         AppRuntime.shared.sessionLogger?.info("application_icon.applied")
+        installWindowObservers()
 
         if let model = AppRuntime.shared.model {
             installStatusBarControllerIfNeeded(with: model)
@@ -53,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func presentWindow(id: String, using model: AppViewModel) {
         model.noteProgrammaticActivation()
+        restoreDockPresenceIfNeeded()
         NSApp.activate(ignoringOtherApps: true)
         WindowRouter.shared.openWindow(id: id)
         refreshWindowTitles()
@@ -60,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async {
             self.refreshWindowTitles()
             WindowRouter.shared.focusExistingWindow(for: id)
+            self.restoreDockPresenceIfNeeded()
             NSApp.activate(ignoringOtherApps: true)
         }
     }
@@ -79,5 +82,84 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 break
             }
         }
+        configureWindowDelegates()
+    }
+
+    private func installWindowObservers() {
+        let notificationCenter = NotificationCenter.default
+        notificationCenter.addObserver(
+            self,
+            selector: #selector(handleWindowVisibilityChanged(_:)),
+            name: NSWindow.didBecomeMainNotification,
+            object: nil
+        )
+        notificationCenter.addObserver(
+            self,
+            selector: #selector(handleWindowVisibilityChanged(_:)),
+            name: NSWindow.didBecomeKeyNotification,
+            object: nil
+        )
+    }
+
+    @objc
+    private func handleWindowVisibilityChanged(_ notification: Notification) {
+        configureWindowDelegates()
+    }
+
+    @objc
+    private func handleMainWindowMiniaturize(_ sender: Any?) {
+        guard let button = sender as? NSButton,
+              let window = button.window,
+              isOrbitWindow(window)
+        else {
+            NSApp.keyWindow?.miniaturize(sender)
+            return
+        }
+        hideMainWindowToStatusBar(window)
+    }
+
+    private func configureWindowDelegates() {
+        for window in NSApp.windows where isOrbitWindow(window) {
+            window.delegate = self
+            window.standardWindowButton(.miniaturizeButton)?.target = self
+            window.standardWindowButton(.miniaturizeButton)?.action = #selector(handleMainWindowMiniaturize(_:))
+        }
+    }
+
+    private func isOrbitWindow(_ window: NSWindow) -> Bool {
+        [
+            L10n.tr("Orbit"),
+            "Orbit",
+        ].contains(window.title)
+    }
+
+    private func hideMainWindowToStatusBar(_ window: NSWindow) {
+        AppRuntime.shared.sessionLogger?.info("window.hide_to_status_bar", metadata: ["title": window.title])
+        window.orderOut(nil)
+        NSApp.setActivationPolicy(.accessory)
+        AppRuntime.shared.sessionLogger?.info("activation_policy.set", metadata: ["policy": "accessory"])
+    }
+
+    private func restoreDockPresenceIfNeeded() {
+        guard NSApp.activationPolicy() != .regular else { return }
+        NSApp.setActivationPolicy(.regular)
+        AppRuntime.shared.sessionLogger?.info("activation_policy.set", metadata: ["policy": "regular"])
+    }
+}
+
+extension AppDelegate: NSWindowDelegate {
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard isOrbitWindow(sender) else { return true }
+        hideMainWindowToStatusBar(sender)
+        return false
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              isOrbitWindow(window)
+        else { return }
+
+        window.deminiaturize(nil)
+        hideMainWindowToStatusBar(window)
     }
 }
