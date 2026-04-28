@@ -19,7 +19,8 @@ enum ResponsesChatCompletionsBridge {
         from data: Data,
         fallbackModel: String,
         requiresNonEmptyToolParameters: Bool = false,
-        usesMiniMaxReasoning: Bool = false
+        usesMiniMaxReasoning: Bool = false,
+        usesDeepSeekReasoning: Bool = false
     ) throws -> Data {
         guard let request = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw TranslationError.invalidRequest(L10n.tr("Responses 请求不是有效的 JSON。"))
@@ -29,7 +30,8 @@ enum ResponsesChatCompletionsBridge {
             from: request,
             fallbackModel: fallbackModel,
             requiresNonEmptyToolParameters: requiresNonEmptyToolParameters,
-            usesMiniMaxReasoning: usesMiniMaxReasoning
+            usesMiniMaxReasoning: usesMiniMaxReasoning,
+            usesDeepSeekReasoning: usesDeepSeekReasoning
         )
         return try JSONSerialization.data(withJSONObject: object, options: [])
     }
@@ -37,12 +39,14 @@ enum ResponsesChatCompletionsBridge {
     static func makeResponsesResponseData(
         from data: Data,
         fallbackModel: String,
-        usesMiniMaxReasoning: Bool = false
+        usesMiniMaxReasoning: Bool = false,
+        usesDeepSeekReasoning: Bool = false
     ) throws -> Data {
         let object = try makeResponsesResponseObject(
             from: data,
             fallbackModel: fallbackModel,
-            usesMiniMaxReasoning: usesMiniMaxReasoning
+            usesMiniMaxReasoning: usesMiniMaxReasoning,
+            usesDeepSeekReasoning: usesDeepSeekReasoning
         )
         return try JSONSerialization.data(withJSONObject: object, options: [])
     }
@@ -438,14 +442,16 @@ enum ResponsesChatCompletionsBridge {
         from request: [String: Any],
         fallbackModel: String,
         requiresNonEmptyToolParameters: Bool,
-        usesMiniMaxReasoning: Bool
+        usesMiniMaxReasoning: Bool,
+        usesDeepSeekReasoning: Bool
     ) throws -> [String: Any] {
         let model = trimmedString(request["model"]) ?? fallbackModel
         let instructions = trimmedString(request["instructions"])
         let messages = try translateMessages(
             from: request["input"],
             instructions: instructions,
-            usesMiniMaxReasoning: usesMiniMaxReasoning
+            usesMiniMaxReasoning: usesMiniMaxReasoning,
+            usesDeepSeekReasoning: usesDeepSeekReasoning
         )
         let tools = translateTools(
             from: request["tools"],
@@ -478,7 +484,8 @@ enum ResponsesChatCompletionsBridge {
     private static func translateMessages(
         from input: Any?,
         instructions: String?,
-        usesMiniMaxReasoning: Bool
+        usesMiniMaxReasoning: Bool,
+        usesDeepSeekReasoning: Bool
     ) throws -> [[String: Any]] {
         var messages = [[String: Any]]()
         if let instructions, !instructions.isEmpty {
@@ -502,21 +509,41 @@ enum ResponsesChatCompletionsBridge {
 
         var lastAssistantIndex: Int?
         var pendingReasoningDetails = [[String: Any]]()
+        var pendingReasoningContents = [String]()
 
         for itemValue in items {
-            guard let item = itemValue as? [String: Any], let type = trimmedString(item["type"]) else { continue }
+            guard
+                let item = itemValue as? [String: Any],
+                let type = normalizedInputItemType(from: item)
+            else {
+                continue
+            }
 
             switch type {
             case "reasoning":
-                guard usesMiniMaxReasoning else { continue }
-                let reasoningDetails = reasoningDetails(from: item)
-                guard !reasoningDetails.isEmpty else { continue }
-                if let index = lastAssistantIndex {
-                    var message = messages[index]
-                    mergeReasoningDetails(reasoningDetails, into: &message)
-                    messages[index] = message
-                } else {
-                    pendingReasoningDetails.append(contentsOf: reasoningDetails)
+                if usesMiniMaxReasoning {
+                    let reasoningDetails = reasoningDetails(from: item)
+                    if !reasoningDetails.isEmpty {
+                        if let index = lastAssistantIndex {
+                            var message = messages[index]
+                            mergeReasoningDetails(reasoningDetails, into: &message)
+                            messages[index] = message
+                        } else {
+                            pendingReasoningDetails.append(contentsOf: reasoningDetails)
+                        }
+                    }
+                }
+                if usesDeepSeekReasoning {
+                    let reasoningContents = reasoningHistoryTexts(from: item)
+                    if !reasoningContents.isEmpty {
+                        if let index = lastAssistantIndex {
+                            var message = messages[index]
+                            mergeReasoningContent(reasoningContents, into: &message)
+                            messages[index] = message
+                        } else {
+                            pendingReasoningContents.append(contentsOf: reasoningContents)
+                        }
+                    }
                 }
             case "message":
                 let role = normalizedRole(from: item["role"])
@@ -528,9 +555,16 @@ enum ResponsesChatCompletionsBridge {
                 } else {
                     message["content"] = ""
                 }
+                if usesDeepSeekReasoning, role == "assistant", let reasoningContent = trimmedString(item["reasoning_content"]) {
+                    mergeReasoningContent([reasoningContent], into: &message)
+                }
                 if usesMiniMaxReasoning, role == "assistant", !pendingReasoningDetails.isEmpty {
                     mergeReasoningDetails(pendingReasoningDetails, into: &message)
                     pendingReasoningDetails.removeAll()
+                }
+                if usesDeepSeekReasoning, role == "assistant", !pendingReasoningContents.isEmpty {
+                    mergeReasoningContent(pendingReasoningContents, into: &message)
+                    pendingReasoningContents.removeAll()
                 }
                 messages.append(message)
                 lastAssistantIndex = role == "assistant" ? messages.index(before: messages.endIndex) : nil
@@ -541,6 +575,10 @@ enum ResponsesChatCompletionsBridge {
                     if usesMiniMaxReasoning, !pendingReasoningDetails.isEmpty {
                         mergeReasoningDetails(pendingReasoningDetails, into: &message)
                         pendingReasoningDetails.removeAll()
+                    }
+                    if usesDeepSeekReasoning, !pendingReasoningContents.isEmpty {
+                        mergeReasoningContent(pendingReasoningContents, into: &message)
+                        pendingReasoningContents.removeAll()
                     }
                     var toolCalls = message["tool_calls"] as? [[String: Any]] ?? []
                     toolCalls.append(toolCall)
@@ -558,6 +596,10 @@ enum ResponsesChatCompletionsBridge {
                     if usesMiniMaxReasoning, !pendingReasoningDetails.isEmpty {
                         mergeReasoningDetails(pendingReasoningDetails, into: &message)
                         pendingReasoningDetails.removeAll()
+                    }
+                    if usesDeepSeekReasoning, !pendingReasoningContents.isEmpty {
+                        mergeReasoningContent(pendingReasoningContents, into: &message)
+                        pendingReasoningContents.removeAll()
                     }
                     messages.append(message)
                     lastAssistantIndex = messages.index(before: messages.endIndex)
@@ -608,6 +650,46 @@ enum ResponsesChatCompletionsBridge {
         guard !details.isEmpty else { return }
         let existingDetails = (message["reasoning_details"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
         message["reasoning_details"] = existingDetails + details
+    }
+
+    private static func reasoningHistoryTexts(from item: [String: Any]) -> [String] {
+        if let reasoningContent = trimmedString(item["reasoning_content"]) {
+            return [reasoningContent]
+        }
+        return reasoningDetails(from: item).compactMap { detail in
+            trimmedString(detail["text"])
+        }
+    }
+
+    private static func normalizedInputItemType(from item: [String: Any]) -> String? {
+        if let type = trimmedString(item["type"]) {
+            return type
+        }
+        if item["role"] != nil || item["content"] != nil {
+            return "message"
+        }
+        if item["call_id"] != nil && (item["name"] != nil || item["arguments"] != nil || item["input"] != nil) {
+            return "function_call"
+        }
+        if item["tool_call_id"] != nil || (item["call_id"] != nil && item["output"] != nil) {
+            return "function_call_output"
+        }
+        if item["summary"] != nil || item["text"] != nil {
+            return "reasoning"
+        }
+        return nil
+    }
+
+    private static func mergeReasoningContent(_ contents: [String], into message: inout [String: Any]) {
+        guard !contents.isEmpty else { return }
+        var merged = [String]()
+        if let existing = trimmedString(message["reasoning_content"]) {
+            merged.append(existing)
+        }
+        merged.append(contentsOf: contents)
+        let combined = merged.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !combined.isEmpty else { return }
+        message["reasoning_content"] = combined
     }
 
     private static func normalizedMiniMaxMessages(_ messages: [[String: Any]]) -> [[String: Any]] {
@@ -881,7 +963,8 @@ enum ResponsesChatCompletionsBridge {
     private static func makeResponsesResponseObject(
         from data: Data,
         fallbackModel: String,
-        usesMiniMaxReasoning: Bool
+        usesMiniMaxReasoning: Bool,
+        usesDeepSeekReasoning: Bool
     ) throws -> [String: Any] {
         guard let response = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw TranslationError.invalidResponse(L10n.tr("上游 Chat Completions 返回了无效 JSON。"))
@@ -896,18 +979,26 @@ enum ResponsesChatCompletionsBridge {
         }
 
         var output = [[String: Any]]()
-        let normalizedOutput = normalizedOutput(from: message, usesMiniMaxReasoning: usesMiniMaxReasoning)
+        let normalizedOutput = normalizedOutput(
+            from: message,
+            usesMiniMaxReasoning: usesMiniMaxReasoning,
+            usesDeepSeekReasoning: usesDeepSeekReasoning
+        )
         if let reasoningItem = normalizedOutput.reasoningItem {
             output.append(reasoningItem)
         }
         if !normalizedOutput.content.isEmpty {
-            output.append([
+            var messageOutput: [String: Any] = [
                 "id": "msg_\(UUID().uuidString)",
                 "type": "message",
                 "status": "completed",
                 "role": "assistant",
                 "content": normalizedOutput.content,
-            ])
+            ]
+            if let reasoningContent = normalizedOutput.reasoningContent {
+                messageOutput["reasoning_content"] = reasoningContent
+            }
+            output.append(messageOutput)
         }
 
         let toolCalls = message["tool_calls"] as? [Any] ?? []
@@ -962,24 +1053,29 @@ enum ResponsesChatCompletionsBridge {
 
     private static func normalizedOutput(
         from message: [String: Any],
-        usesMiniMaxReasoning: Bool
-    ) -> (reasoningItem: [String: Any]?, content: [[String: Any]]) {
-        var reasoningTexts = usesMiniMaxReasoning ? reasoningTexts(from: message["reasoning_details"]) : []
+        usesMiniMaxReasoning: Bool,
+        usesDeepSeekReasoning: Bool
+    ) -> (reasoningItem: [String: Any]?, content: [[String: Any]], reasoningContent: String?) {
+        let deepSeekReasoningContent = usesDeepSeekReasoning ? trimmedString(message["reasoning_content"]) : nil
+        var reasoningSummaryTexts = usesMiniMaxReasoning ? reasoningTexts(from: message["reasoning_details"]) : []
+        if reasoningSummaryTexts.isEmpty, usesDeepSeekReasoning {
+            reasoningSummaryTexts = reasoningTexts(from: deepSeekReasoningContent)
+        }
         let extraction = outputTextContent(
             from: message["content"],
             stripMiniMaxThinking: usesMiniMaxReasoning,
-            collectMiniMaxThinking: usesMiniMaxReasoning && reasoningTexts.isEmpty
+            collectMiniMaxThinking: usesMiniMaxReasoning && reasoningSummaryTexts.isEmpty
         )
-        if reasoningTexts.isEmpty {
-            reasoningTexts = extraction.reasoningTexts
+        if reasoningSummaryTexts.isEmpty {
+            reasoningSummaryTexts = extraction.reasoningTexts
         }
 
         let reasoningItem: [String: Any]?
-        if usesMiniMaxReasoning, !reasoningTexts.isEmpty {
+        if (usesMiniMaxReasoning || usesDeepSeekReasoning), !reasoningSummaryTexts.isEmpty {
             reasoningItem = [
                 "id": "rs_\(UUID().uuidString)",
                 "type": "reasoning",
-                "summary": reasoningTexts.map { text in
+                "summary": reasoningSummaryTexts.map { text in
                     [
                         "type": "summary_text",
                         "text": text,
@@ -991,7 +1087,19 @@ enum ResponsesChatCompletionsBridge {
             reasoningItem = nil
         }
 
-        return (reasoningItem, extraction.content)
+        let reasoningContentForHistory: String?
+        if usesDeepSeekReasoning {
+            if let deepSeekReasoningContent {
+                reasoningContentForHistory = deepSeekReasoningContent
+            } else {
+                let merged = reasoningSummaryTexts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                reasoningContentForHistory = merged.isEmpty ? nil : merged
+            }
+        } else {
+            reasoningContentForHistory = nil
+        }
+
+        return (reasoningItem, extraction.content, reasoningContentForHistory)
     }
 
     private static func reasoningTexts(from value: Any?) -> [String] {

@@ -282,11 +282,13 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
             let requestObject = try requestJSONObject(from: request.body)
             let wantsStream = (requestObject["stream"] as? Bool) ?? false
             let usesMiniMaxReasoning = isMiniMaxAPIHost(state.baseURL)
+            let usesDeepSeekReasoning = isDeepSeekAPIHost(state.baseURL)
             let upstreamRequest = try ResponsesChatCompletionsBridge.makeChatCompletionsRequestData(
                 from: request.body,
                 fallbackModel: state.defaultModel,
                 requiresNonEmptyToolParameters: usesMiniMaxReasoning,
-                usesMiniMaxReasoning: usesMiniMaxReasoning
+                usesMiniMaxReasoning: usesMiniMaxReasoning,
+                usesDeepSeekReasoning: usesDeepSeekReasoning
             )
             let (statusCode, data) = try await sendUpstreamRequestHandlingOverload(
                 baseURL: state.baseURL,
@@ -304,7 +306,8 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
             let responseData = try ResponsesChatCompletionsBridge.makeResponsesResponseData(
                 from: data,
                 fallbackModel: state.defaultModel,
-                usesMiniMaxReasoning: usesMiniMaxReasoning
+                usesMiniMaxReasoning: usesMiniMaxReasoning,
+                usesDeepSeekReasoning: usesDeepSeekReasoning
             )
             guard let responseObject = try JSONSerialization.jsonObject(with: responseData) as? [String: Any] else {
                 throw ResponsesChatCompletionsBridge.TranslationError.invalidResponse(L10n.tr("本地桥接响应格式无效。"))
@@ -412,6 +415,19 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
         }
 
         return normalized
+    }
+
+    private func isDeepSeekAPIHost(_ baseURL: String) -> Bool {
+        let trimmedBaseURL = baseURL
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !trimmedBaseURL.isEmpty else {
+            return false
+        }
+
+        let rawURL = URL(string: trimmedBaseURL)
+            ?? URL(string: "https://\(trimmedBaseURL)")
+        return rawURL?.host?.lowercased() == "api.deepseek.com"
     }
 
     private func reasonPhrase(for statusCode: Int) -> String {

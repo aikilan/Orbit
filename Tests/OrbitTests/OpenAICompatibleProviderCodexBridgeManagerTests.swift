@@ -117,6 +117,215 @@ final class OpenAICompatibleProviderCodexBridgeManagerTests: XCTestCase {
         XCTAssertEqual(output.last?["type"] as? String, "function_call")
     }
 
+    func testDeepSeekBridgePreservesReasoningContentAcrossTurns() async throws {
+        actor Recorder {
+            var lastRequestBody: Data?
+
+            func store(_ data: Data) {
+                lastRequestBody = data
+            }
+
+            func body() -> Data? {
+                lastRequestBody
+            }
+        }
+
+        let recorder = Recorder()
+        let upstreamResponse = try JSONSerialization.data(withJSONObject: [
+            "id": "chatcmpl_deepseek_reasoning",
+            "model": "deepseek-reasoner",
+            "choices": [
+                [
+                    "index": 0,
+                    "message": [
+                        "role": "assistant",
+                        "reasoning_content": "先检查最近一次工具输出。",
+                        "content": "建议先运行测试。",
+                    ],
+                    "finish_reason": "stop",
+                ],
+            ],
+            "usage": [
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            ],
+        ])
+
+        let manager = OpenAICompatibleProviderCodexBridgeManager(
+            sendUpstreamRequest: { _, _, body in
+                await recorder.store(body)
+                return (200, upstreamResponse)
+            }
+        )
+
+        let bridge = try await manager.prepareBridge(
+            accountID: UUID(),
+            baseURL: "https://api.deepseek.com/v1",
+            apiKeyEnvName: "DEEPSEEK_API_KEY",
+            apiKey: "sk-deepseek-test",
+            model: "deepseek-reasoner",
+            availableModels: ["deepseek-reasoner"]
+        )
+
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(bridge.baseURL)/v1/responses")))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": "deepseek-reasoner",
+            "stream": false,
+            "input": [
+                [
+                    "type": "reasoning",
+                    "summary": [
+                        [
+                            "type": "summary_text",
+                            "text": "先检查最近一次工具输出。",
+                        ],
+                    ],
+                ],
+                [
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        [
+                            "type": "output_text",
+                            "text": "我先看一下上一轮结果。",
+                        ],
+                    ],
+                ],
+                [
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "input_text",
+                            "text": "下一步怎么做？",
+                        ],
+                    ],
+                ],
+            ],
+        ])
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        let session = URLSession(configuration: configuration)
+        let (data, response) = try await session.data(for: request)
+        let httpResponse = try XCTUnwrap(response as? HTTPURLResponse)
+        let responseObject = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let output = try XCTUnwrap(responseObject["output"] as? [[String: Any]])
+        let recordedBody = await recorder.body()
+        let upstreamBody = try XCTUnwrap(recordedBody)
+        let upstreamRequestObject = try XCTUnwrap(try JSONSerialization.jsonObject(with: upstreamBody) as? [String: Any])
+        let upstreamMessages = try XCTUnwrap(upstreamRequestObject["messages"] as? [[String: Any]])
+        let assistantMessage = try XCTUnwrap(upstreamMessages.first(where: { ($0["role"] as? String) == "assistant" }))
+        let reasoningOutput = try XCTUnwrap(output.first(where: { ($0["type"] as? String) == "reasoning" }))
+        let reasoningSummary = try XCTUnwrap(reasoningOutput["summary"] as? [[String: Any]])
+        let assistantOutput = try XCTUnwrap(output.first(where: { ($0["type"] as? String) == "message" }))
+
+        XCTAssertEqual(httpResponse.statusCode, 200)
+        XCTAssertEqual(assistantMessage["reasoning_content"] as? String, "先检查最近一次工具输出。")
+        XCTAssertEqual(reasoningSummary.first?["text"] as? String, "先检查最近一次工具输出。")
+        XCTAssertEqual(assistantOutput["reasoning_content"] as? String, "先检查最近一次工具输出。")
+        XCTAssertEqual(output.dropFirst().first?["type"] as? String, "message")
+    }
+
+    func testDeepSeekBridgePreservesAssistantReasoningContentWithoutTypeField() async throws {
+        actor Recorder {
+            var lastRequestBody: Data?
+
+            func store(_ data: Data) {
+                lastRequestBody = data
+            }
+
+            func body() -> Data? {
+                lastRequestBody
+            }
+        }
+
+        let recorder = Recorder()
+        let upstreamResponse = try JSONSerialization.data(withJSONObject: [
+            "id": "chatcmpl_deepseek_reasoning_no_type",
+            "model": "deepseek-reasoner",
+            "choices": [
+                [
+                    "index": 0,
+                    "message": [
+                        "role": "assistant",
+                        "reasoning_content": "我会先复用上一轮推理。",
+                        "content": "继续执行。",
+                    ],
+                    "finish_reason": "stop",
+                ],
+            ],
+            "usage": [
+                "prompt_tokens": 8,
+                "completion_tokens": 4,
+                "total_tokens": 12,
+            ],
+        ])
+
+        let manager = OpenAICompatibleProviderCodexBridgeManager(
+            sendUpstreamRequest: { _, _, body in
+                await recorder.store(body)
+                return (200, upstreamResponse)
+            }
+        )
+
+        let bridge = try await manager.prepareBridge(
+            accountID: UUID(),
+            baseURL: "https://api.deepseek.com/v1",
+            apiKeyEnvName: "DEEPSEEK_API_KEY",
+            apiKey: "sk-deepseek-test",
+            model: "deepseek-reasoner",
+            availableModels: ["deepseek-reasoner"]
+        )
+
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(bridge.baseURL)/v1/responses")))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": "deepseek-reasoner",
+            "stream": false,
+            "input": [
+                [
+                    "role": "assistant",
+                    "reasoning_content": "先检查上一次工具输出，再继续。",
+                    "content": [
+                        [
+                            "type": "output_text",
+                            "text": "上一轮结果已经拿到。",
+                        ],
+                    ],
+                ],
+                [
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "input_text",
+                            "text": "继续下一步。",
+                        ],
+                    ],
+                ],
+            ],
+        ])
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        let session = URLSession(configuration: configuration)
+        let (_, response) = try await session.data(for: request)
+        let httpResponse = try XCTUnwrap(response as? HTTPURLResponse)
+        let recordedBody = await recorder.body()
+        let upstreamBody = try XCTUnwrap(recordedBody)
+        let upstreamRequestObject = try XCTUnwrap(try JSONSerialization.jsonObject(with: upstreamBody) as? [String: Any])
+        let upstreamMessages = try XCTUnwrap(upstreamRequestObject["messages"] as? [[String: Any]])
+        let firstAssistant = try XCTUnwrap(upstreamMessages.first)
+
+        XCTAssertEqual(httpResponse.statusCode, 200)
+        XCTAssertEqual(firstAssistant["role"] as? String, "assistant")
+        XCTAssertEqual(firstAssistant["reasoning_content"] as? String, "先检查上一次工具输出，再继续。")
+    }
+
     func testBridgeStreamsCodexCompatibleResponsesEvents() async throws {
         let upstreamResponse = try JSONSerialization.data(withJSONObject: [
             "id": "chatcmpl_stream_test",
