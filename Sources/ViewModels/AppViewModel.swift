@@ -1190,9 +1190,68 @@ final class AppViewModel: ObservableObject {
         codexSubscriptionQuotaAutoRefreshTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 await self?.refreshCodexSubscriptionQuotasOnce()
-                try? await Task.sleep(for: codexSubscriptionQuotaAutoRefreshInterval)
+                let sleepDuration = self?.codexSubscriptionQuotaAutoRefreshSleepDuration(
+                    defaultInterval: codexSubscriptionQuotaAutoRefreshInterval
+                ) ?? codexSubscriptionQuotaAutoRefreshInterval
+                try? await Task.sleep(for: sleepDuration)
             }
         }
+    }
+
+    private func codexSubscriptionQuotaAutoRefreshSleepDuration(defaultInterval: Duration, now: Date = Date()) -> Duration {
+        // 重置前最后一分钟缩短轮询，确保额度恢复后账号状态能尽快更新到界面。
+        if hasCodexQuotaResetWithinOneMinute(now: now) {
+            return .seconds(30)
+        }
+        if let secondsUntilLastMinute = secondsUntilNextCodexQuotaLastMinute(now: now),
+           secondsUntilLastMinute < seconds(from: defaultInterval) {
+            return .seconds(max(1, Int64(secondsUntilLastMinute.rounded(.up))))
+        }
+        return defaultInterval
+    }
+
+    private func hasCodexQuotaResetWithinOneMinute(now: Date) -> Bool {
+        database.accounts.contains { account in
+            guard
+                account.providerRule == .chatgptOAuth,
+                let snapshot = database.snapshot(for: account.id)
+            else {
+                return false
+            }
+
+            return [snapshot.fiveHourWindow?.resetsAt, snapshot.weeklyWindow?.resetsAt]
+                .compactMap { $0 }
+                .contains {
+                    let secondsUntilReset = $0.timeIntervalSince(now)
+                    return secondsUntilReset >= 0 && secondsUntilReset < 60
+                }
+        }
+    }
+
+    private func secondsUntilNextCodexQuotaLastMinute(now: Date) -> TimeInterval? {
+        guard let secondsUntilNextReset = nextCodexQuotaResetInterval(now: now) else {
+            return nil
+        }
+        let secondsUntilLastMinute = secondsUntilNextReset - 60
+        return secondsUntilLastMinute >= 0 ? secondsUntilLastMinute : nil
+    }
+
+    private func nextCodexQuotaResetInterval(now: Date) -> TimeInterval? {
+        database.accounts
+            .filter { $0.providerRule == .chatgptOAuth }
+            .compactMap { account -> [TimeInterval]? in
+                guard let snapshot = database.snapshot(for: account.id) else { return nil }
+                return [snapshot.fiveHourWindow?.resetsAt, snapshot.weeklyWindow?.resetsAt]
+                    .compactMap { $0?.timeIntervalSince(now) }
+                    .filter { $0 >= 0 }
+            }
+            .flatMap { $0 }
+            .min()
+    }
+
+    private func seconds(from duration: Duration) -> TimeInterval {
+        let components = duration.components
+        return TimeInterval(components.seconds) + TimeInterval(components.attoseconds) / 1_000_000_000_000_000_000
     }
 
     private func hasCopilotSessionQueueItem(for candidate: CopilotSessionCandidate) -> Bool {

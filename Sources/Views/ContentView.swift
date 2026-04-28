@@ -584,47 +584,7 @@ private struct AccountListRow: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .center, spacing: 6) {
-                    if isRefreshingStatus {
-                        ProgressView()
-                            .controlSize(.small)
-                            .scaleEffect(0.64)
-                            .frame(width: 14, height: 14)
-
-                        Text(L10n.tr("正在刷新账号状态..."))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    } else {
-                        Label(statusSummary ?? fallbackStatusSummary, systemImage: "gauge.with.dots.needle.67percent")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-
-                        if let failureStatusMessage {
-                            Image(systemName: "exclamationmark.circle.fill")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Color.red)
-                                .onHover { hovering in
-                                    isHoveringFailureIcon = hovering
-                                }
-                                .popover(isPresented: failurePopoverBinding, arrowEdge: .leading) {
-                                    AccountFailurePopoverContent(message: failureStatusMessage)
-                                }
-                        }
-                    }
-                }
-
-                if shouldShowCodexResetCountdowns {
-                    TimelineView(.periodic(from: .now, by: 60)) { context in
-                        let countdowns = snapshot?.resetCountdowns(now: context.date)
-                        if let countdowns, !countdowns.isEmpty {
-                            QuotaResetCountdownRow(countdowns: countdowns)
-                        }
-                    }
-                }
-            }
+            statusContent
         }
         .padding(.leading, 12)
         .padding(.trailing, showsReorderHandle ? 30 : 12)
@@ -685,6 +645,61 @@ private struct AccountListRow: View {
 
     private var shouldShowCodexResetCountdowns: Bool {
         account.providerRule == .chatgptOAuth && snapshot != nil && !isRefreshingStatus
+    }
+
+    @ViewBuilder
+    private var statusContent: some View {
+        if isRefreshingStatus {
+            HStack(alignment: .center, spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.64)
+                    .frame(width: 14, height: 14)
+
+                Text(L10n.tr("正在刷新账号状态..."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        } else if shouldShowCodexResetCountdowns, let snapshot {
+            ZStack(alignment: .topTrailing) {
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    CodexQuotaInfoPanel(
+                        snapshot: snapshot,
+                        countdowns: snapshot.resetCountdowns(now: context.date),
+                        renewalText: subscriptionRenewalText
+                    )
+                }
+
+                failureStatusIndicator
+                    .padding(.top, 6)
+                    .padding(.trailing, 6)
+            }
+        } else {
+            HStack(alignment: .center, spacing: 6) {
+                Label(statusSummary ?? fallbackStatusSummary, systemImage: "gauge.with.dots.needle.67percent")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                failureStatusIndicator
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var failureStatusIndicator: some View {
+        if let failureStatusMessage {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.red)
+                .onHover { hovering in
+                    isHoveringFailureIcon = hovering
+                }
+                .popover(isPresented: failurePopoverBinding, arrowEdge: .leading) {
+                    AccountFailurePopoverContent(message: failureStatusMessage)
+                }
+        }
     }
 
     private var subscriptionRenewalText: String? {
@@ -768,37 +783,128 @@ private struct AccountListRow: View {
     }
 }
 
-private struct QuotaResetCountdownRow: View {
+private struct CodexQuotaInfoPanel: View {
+    let snapshot: QuotaSnapshot
     let countdowns: CodexQuotaResetCountdowns
+    let renewalText: String?
+    private let labelColumnWidth: CGFloat = 66
+    private let valueColumnWidth: CGFloat = 50
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                countdownText(L10n.tr("5h 重置"), countdowns.fiveHour)
-                countdownText(L10n.tr("7d 重置"), countdowns.weekly)
+        VStack(alignment: .leading, spacing: 7) {
+            quotaValueRow
+            if !countdowns.isEmpty {
+                countdownValueRow
             }
+            if let renewalText {
+                renewalRow(renewalText)
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(OrbitPalette.chromeSubtle, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(OrbitPalette.divider.opacity(0.55), lineWidth: 1)
+        )
+    }
 
-            VStack(alignment: .leading, spacing: 2) {
-                countdownText(L10n.tr("5h 重置"), countdowns.fiveHour)
-                countdownText(L10n.tr("7d 重置"), countdowns.weekly)
-            }
+    private var quotaValueRow: some View {
+        alignedMetricRow(
+            systemImage: "gauge.with.dots.needle.67percent",
+            title: L10n.tr("剩余"),
+            fiveHourText: snapshot.fiveHourWindow.map { "5h \($0.remainingPercentText)" },
+            weeklyText: snapshot.weeklyWindow.map { "7d \($0.remainingPercentText)" },
+            fiveHourColor: OrbitPalette.accent,
+            weeklyColor: .green
+        )
+    }
+
+    private var countdownValueRow: some View {
+        alignedMetricRow(
+            systemImage: "clock",
+            title: L10n.tr("重置时间"),
+            fiveHourText: countdowns.fiveHour.map { L10n.tr("%@ 后", $0.text) },
+            weeklyText: countdowns.weekly.map { L10n.tr("%@ 后", $0.text) },
+            fiveHourColor: countdowns.fiveHour.map { foregroundColor(for: $0.tone, normalColor: OrbitPalette.accent) } ?? OrbitPalette.accent,
+            weeklyColor: countdowns.weekly.map { foregroundColor(for: $0.tone, normalColor: .green) } ?? .green
+        )
+    }
+
+    private func alignedMetricRow(
+        systemImage: String,
+        title: String,
+        fiveHourText: String?,
+        weeklyText: String?,
+        fiveHourColor: Color,
+        weeklyColor: Color
+    ) -> some View {
+        HStack(alignment: .center, spacing: 7) {
+            metricLabel(systemImage: systemImage, title: title)
+
+            metricValue(fiveHourText, color: fiveHourColor)
+                .frame(width: valueColumnWidth, alignment: .leading)
+
+            metricValue(weeklyText, color: weeklyColor)
+                .frame(width: valueColumnWidth, alignment: .leading)
+
+            Spacer(minLength: 0)
         }
     }
 
-    @ViewBuilder
-    private func countdownText(_ title: String, _ countdown: QuotaResetCountdown?) -> some View {
-        if let countdown {
-            Text("\(title) \(countdown.text)")
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(foregroundColor(for: countdown.tone))
+    private func metricLabel(systemImage: String, title: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 14)
+
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .frame(width: labelColumnWidth, alignment: .leading)
+    }
+
+    private func metricValue(_ text: String?, color: Color) -> some View {
+        Group {
+            if let text {
+                Text(text)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            } else {
+                Text("")
+                    .font(.caption.weight(.bold))
+            }
         }
     }
 
-    private func foregroundColor(for tone: QuotaResetCountdownTone) -> Color {
+    private func renewalRow(_ renewalText: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "calendar")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 14)
+
+            Text(renewalText)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.86)
+        }
+        .padding(.top, 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func foregroundColor(for tone: QuotaResetCountdownTone, normalColor: Color) -> Color {
         switch tone {
         case .normal:
-            return Color(nsColor: .secondaryLabelColor)
+            return normalColor
         case .warning:
             return .yellow
         case .danger:

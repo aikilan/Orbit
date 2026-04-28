@@ -463,6 +463,9 @@
 "偏好设置" = "Preferences";
 "5h 重置" = "5h Reset";
 "7d 重置" = "7d Reset";
+"剩余" = "Remaining";
+"重置时间" = "Reset";
+"%@ 后" = "in %@";
 "5 小时重置倒计时" = "5h Reset Countdown";
 "7 天重置倒计时" = "7d Reset Countdown";
 "后台额度同步失败：%@" = "Background quota sync failed: %@";

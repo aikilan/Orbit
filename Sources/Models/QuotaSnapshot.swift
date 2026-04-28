@@ -16,17 +16,30 @@ struct QuotaResetCountdown: Equatable, Sendable {
     let text: String
     let tone: QuotaResetCountdownTone
 
-    init(until resetDate: Date, now: Date = Date()) {
+    init(
+        until resetDate: Date,
+        now: Date = Date(),
+        warningThresholdMinutes: Int = 60,
+        dangerThresholdMinutes: Int = 10
+    ) {
         let remainingSeconds = max(0, Int(resetDate.timeIntervalSince(now).rounded(.down)))
         let totalMinutes = remainingSeconds / 60
         let days = totalMinutes / 1_440
-        let hours = (totalMinutes % 1_440) / 60
-        let minutes = totalMinutes % 60
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes
 
-        text = String(format: "%dd-%02dh-%02dm", days, hours, minutes)
-        if remainingSeconds == 0 || totalMinutes < 300 {
+        // 输出只保留当前量级，避免列表里倒计时信息过长影响账号扫描效率。
+        if days >= 1 {
+            text = "\(days)d"
+        } else if hours >= 1 {
+            text = "\(hours)h"
+        } else {
+            text = "\(minutes)m"
+        }
+
+        if remainingSeconds == 0 || totalMinutes < dangerThresholdMinutes {
             tone = .danger
-        } else if totalMinutes < 1_440 {
+        } else if totalMinutes < warningThresholdMinutes {
             tone = .warning
         } else {
             tone = .normal
@@ -59,7 +72,13 @@ extension RateLimitWindowSnapshot {
 
     func resetCountdown(now: Date = Date()) -> QuotaResetCountdown? {
         guard let resetsAt else { return nil }
-        return QuotaResetCountdown(until: resetsAt, now: now)
+        let isWeeklyWindow = windowMinutes >= 1_440
+        return QuotaResetCountdown(
+            until: resetsAt,
+            now: now,
+            warningThresholdMinutes: isWeeklyWindow ? 1_440 : 60,
+            dangerThresholdMinutes: isWeeklyWindow ? 300 : 10
+        )
     }
 }
 
