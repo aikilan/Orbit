@@ -3,18 +3,21 @@ import Foundation
 struct SubscriptionDetails: Codable, Hashable, Sendable {
     var allowed: Bool? = nil
     var limitReached: Bool? = nil
+    var currentPeriodEndsAt: Date? = nil
 }
 
 extension SubscriptionDetails {
     var hasAnyValue: Bool {
         allowed != nil
             || limitReached != nil
+            || currentPeriodEndsAt != nil
     }
 
     func merged(over existing: SubscriptionDetails?) -> SubscriptionDetails {
         SubscriptionDetails(
             allowed: allowed ?? existing?.allowed,
-            limitReached: limitReached ?? existing?.limitReached
+            limitReached: limitReached ?? existing?.limitReached,
+            currentPeriodEndsAt: currentPeriodEndsAt ?? existing?.currentPeriodEndsAt
         )
     }
 

@@ -559,7 +559,8 @@ private struct UsageResponse: Decodable {
         if let rateLimit {
             details = SubscriptionDetails(
                 allowed: details?.allowed ?? rateLimit.allowed,
-                limitReached: details?.limitReached ?? rateLimit.limitReached
+                limitReached: details?.limitReached ?? rateLimit.limitReached,
+                currentPeriodEndsAt: details?.currentPeriodEndsAt
             )
         }
         subscriptionDetails = details?.hasAnyValue == true ? details : nil
@@ -671,6 +672,7 @@ private struct UsageResponse: Decodable {
     private static func decodeSubscriptionDetails(
         in container: KeyedDecodingContainer<DynamicCodingKey>
     ) -> SubscriptionDetails? {
+        // 输入：usage 响应的 subscription/plan 容器；输出：可持久化的套餐可用性与周期结束时间。
         let details = SubscriptionDetails(
             allowed: decodeBool(in: container, keys: [
                 "allowed",
@@ -681,10 +683,21 @@ private struct UsageResponse: Decodable {
             limitReached: decodeBool(in: container, keys: [
                 "limit_reached",
                 "is_limit_reached",
-            ])
+            ]),
+            currentPeriodEndsAt: decodeUnixDate(in: container, keys: ["expires_at"])
         )
 
         return details.hasAnyValue ? details : nil
+    }
+
+    private static func decodeUnixDate(
+        in container: KeyedDecodingContainer<DynamicCodingKey>,
+        keys: [String]
+    ) -> Date? {
+        guard let timestamp = decodeInt(in: container, keys: keys) else {
+            return nil
+        }
+        return Date(timeIntervalSince1970: TimeInterval(timestamp))
     }
 
     private static func decodeString(

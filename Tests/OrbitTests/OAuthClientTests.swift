@@ -143,6 +143,7 @@ final class OAuthClientTests: XCTestCase {
         XCTAssertEqual(result.snapshot.credits?.balance, 9.5)
         XCTAssertEqual(result.subscriptionDetails?.allowed, true)
         XCTAssertEqual(result.subscriptionDetails?.limitReached, false)
+        XCTAssertEqual(result.subscriptionDetails?.currentPeriodEndsAt, Date(timeIntervalSince1970: 1_775_126_400))
     }
 
     func testFetchUsageSnapshotParsesPersonalAccountResponseWithFlexibleFieldTypes() async throws {

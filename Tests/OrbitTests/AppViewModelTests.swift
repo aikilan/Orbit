@@ -643,9 +643,11 @@ final class AppViewModelTests: XCTestCase {
             capturedAt: Date(),
             source: .onlineUsageRefresh
         )
+        let subscriptionCurrentPeriodEndsAt = Date(timeIntervalSince1970: 1_775_126_400)
         let subscriptionDetails = SubscriptionDetails(
             allowed: true,
-            limitReached: false
+            limitReached: false,
+            currentPeriodEndsAt: subscriptionCurrentPeriodEndsAt
         )
 
         let harness = try await makeHarness(
@@ -693,6 +695,7 @@ final class AppViewModelTests: XCTestCase {
         )
         XCTAssertEqual(refreshedAccount.subscriptionDetails?.allowed, true)
         XCTAssertEqual(refreshedAccount.subscriptionDetails?.limitReached, false)
+        XCTAssertEqual(refreshedAccount.subscriptionDetails?.currentPeriodEndsAt, subscriptionCurrentPeriodEndsAt)
     }
 
     func testRefreshCopilotAccountStatusUsesLiveModelWhenStoredModelIsStale() async throws {

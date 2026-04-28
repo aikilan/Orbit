@@ -186,6 +186,30 @@ final class PlatformFoundationTests: XCTestCase {
         XCTAssertEqual(database.accounts.first?.platform, .codex)
     }
 
+    func testSubscriptionDetailsCodableKeepsCurrentPeriodEndAndAcceptsLegacyShape() throws {
+        let currentPeriodEndsAt = Date(timeIntervalSince1970: 1_775_126_400)
+        let details = SubscriptionDetails(
+            allowed: true,
+            limitReached: false,
+            currentPeriodEndsAt: currentPeriodEndsAt
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let decoded = try decoder.decode(SubscriptionDetails.self, from: encoder.encode(details))
+        XCTAssertEqual(decoded.currentPeriodEndsAt, currentPeriodEndsAt)
+
+        let legacyDetails = try decoder.decode(
+            SubscriptionDetails.self,
+            from: Data(#"{"allowed":true,"limitReached":false}"#.utf8)
+        )
+        XCTAssertEqual(legacyDetails.allowed, true)
+        XCTAssertEqual(legacyDetails.limitReached, false)
+        XCTAssertNil(legacyDetails.currentPeriodEndsAt)
+    }
+
     func testLegacyCLIWorkingDirectoriesMigrateToLaunchHistory() throws {
         let accountID = UUID()
         let path = "/tmp/workspace"

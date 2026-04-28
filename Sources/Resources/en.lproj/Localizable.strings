@@ -1,4 +1,5 @@
 "%@ 当前剩余 %@，建议切换到 %@（%@）。" = "%@ currently has %@ remaining. Consider switching to %@ (%@).";
+"%@ · %@" = "%@ · %@";
 "%@ 的 5 小时额度接近 10%%，可切换到 %@（%@）。" = "%@ is close to the 10%% threshold in the 5-hour window. You can switch to %@ (%@).";
 "5 小时剩余" = "5-hour remaining";
 "5 小时重置" = "5-hour reset";
@@ -94,6 +95,7 @@
 "在线刷新" = "Online Refresh";
 "处理中..." = "Processing...";
 "套餐类型" = "Plan Type";
+"到期/续期时间" = "Expiration/Renewal";
 "如果这是当前激活账号，第二个选项会让本机当前 Codex 处于登出状态。" = "If this is the active account, the second option will sign out the current local Codex.";
 "导出图标失败: %@" = "Failed to export icons: %@";
 "将 API Key 写入 `~/.codex/auth.json` 并缓存到本地账号库，后续可以像其它账号一样切换。" = "Write the API Key into `~/.codex/auth.json` and cache it in the local account store so it can be switched like other accounts later.";
@@ -135,6 +137,7 @@
 "当前账号 5 小时额度偏低" = "Current Account Has Low 5-hour Quota";
 "当前账号：%@" = "Current account: %@";
 "当前需要手动粘贴浏览器最终跳转的 redirect URL 或 authorization code。" = "You need to manually paste the browser's final redirect URL or authorization code.";
+"续期 %@" = "Renews %@";
 "快捷操作" = "Quick Actions";
 "仅支持编辑 Provider API Key 账号；规则已锁定，API Key 留空表示继续使用当前凭据。" = "Only Provider API Key accounts can be edited here. The rule is locked, and leaving the API Key empty keeps the current credential.";
 "Provider API Key 本地凭据可用。" = "Provider API Key local credential is available.";

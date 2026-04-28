@@ -178,6 +178,7 @@ struct ContentView: View {
                                 isSelected: resolvedSelectedAccountID == account.id,
                                 isDropTarget: dropTargetAccountID == account.id,
                                 isHovering: hoveredAccountID == account.id,
+                                isRefreshingStatus: model.isRefreshingStatus(for: account.id),
                                 showsReorderHandle: model.accounts.count > 1
                             )
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -552,6 +553,8 @@ private struct AccountListRow: View {
     let isSelected: Bool
     let isDropTarget: Bool
     let isHovering: Bool
+    // 输入：刷新任务命中当前账号时，列表行改为即时 loading 状态。
+    let isRefreshingStatus: Bool
     let showsReorderHandle: Bool
 
     @State private var isHoveringFailureIcon = false
@@ -582,21 +585,33 @@ private struct AccountListRow: View {
                 .lineLimit(1)
 
             HStack(alignment: .center, spacing: 6) {
-                Label(statusSummary ?? fallbackStatusSummary, systemImage: "gauge.with.dots.needle.67percent")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if isRefreshingStatus {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.64)
+                        .frame(width: 14, height: 14)
 
-                if let failureStatusMessage {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.red)
-                        .onHover { hovering in
-                            isHoveringFailureIcon = hovering
-                        }
-                        .popover(isPresented: failurePopoverBinding, arrowEdge: .leading) {
-                            AccountFailurePopoverContent(message: failureStatusMessage)
-                        }
+                    Text(L10n.tr("正在刷新账号状态..."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else {
+                    Label(statusSummary ?? fallbackStatusSummary, systemImage: "gauge.with.dots.needle.67percent")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    if let failureStatusMessage {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.red)
+                            .onHover { hovering in
+                                isHoveringFailureIcon = hovering
+                            }
+                            .popover(isPresented: failurePopoverBinding, arrowEdge: .leading) {
+                                AccountFailurePopoverContent(message: failureStatusMessage)
+                            }
+                    }
                 }
             }
         }
@@ -619,6 +634,7 @@ private struct AccountListRow: View {
         }
         .animation(.easeOut(duration: 0.14), value: isSelected)
         .animation(.easeOut(duration: 0.12), value: isHovering)
+        .animation(.easeOut(duration: 0.12), value: isRefreshingStatus)
     }
 
     private var accountSubtitle: String {
@@ -636,13 +652,16 @@ private struct AccountListRow: View {
 
     private var statusSummary: String? {
         if let snapshot {
-            return L10n.tr("剩余 %@", snapshot.remainingSummary)
+            return statusSummaryWithSubscriptionRenewal(L10n.tr("剩余 %@", snapshot.remainingSummary))
         }
         if let claudeSnapshot {
             return L10n.tr("请求剩余 %@", claudeRemainingText(claudeSnapshot.requests.remaining))
         }
         if let chat = copilotSnapshot?.chat {
             return L10n.tr("Chat 剩余 %@", chat.remainingPercentageText)
+        }
+        if let subscriptionRenewalText {
+            return subscriptionRenewalText
         }
         if account.providerRule == .githubCopilot {
             return L10n.tr("本地 Copilot")
@@ -651,6 +670,23 @@ private struct AccountListRow: View {
             return L10n.tr("本地 Profile")
         }
         return nil
+    }
+
+    private var subscriptionRenewalText: String? {
+        guard
+            account.providerRule == .chatgptOAuth,
+            let currentPeriodEndsAt = account.subscriptionDetails?.currentPeriodEndsAt
+        else {
+            return nil
+        }
+        return L10n.tr("续期 %@", currentPeriodEndsAt.formatted(date: .abbreviated, time: .omitted))
+    }
+
+    private func statusSummaryWithSubscriptionRenewal(_ summary: String) -> String {
+        guard let subscriptionRenewalText else {
+            return summary
+        }
+        return L10n.tr("%@ · %@", summary, subscriptionRenewalText)
     }
 
     private var fallbackStatusSummary: String {
@@ -683,6 +719,9 @@ private struct AccountListRow: View {
         if isSelected {
             return OrbitPalette.selectionFill
         }
+        if isRefreshingStatus {
+            return OrbitPalette.floatingPanel
+        }
         if account.isActive {
             return OrbitPalette.panelMuted
         }
@@ -698,6 +737,9 @@ private struct AccountListRow: View {
         }
         if isSelected {
             return OrbitPalette.accent.opacity(0.3)
+        }
+        if isRefreshingStatus {
+            return OrbitPalette.accent.opacity(0.18)
         }
         if isHovering {
             return OrbitPalette.hoverBorder
@@ -995,6 +1037,16 @@ private struct AccountDetailView: View {
         return details.limitStatusText
     }
 
+    private var codexCurrentPeriodEndsAtText: String? {
+        guard
+            account.providerRule == .chatgptOAuth,
+            let currentPeriodEndsAt = account.subscriptionDetails?.currentPeriodEndsAt
+        else {
+            return nil
+        }
+        return currentPeriodEndsAt.formatted(date: .abbreviated, time: .omitted)
+    }
+
     private func inspectorRow(_ label: String, _ value: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Text(label)
@@ -1289,6 +1341,9 @@ private struct AccountDetailView: View {
                 inspectorRow(L10n.tr("账号 ID"), account.accountIdentifier)
                 inspectorRow(credentialSummaryLabel, credentialSummaryValue)
                 inspectorRow(L10n.tr("套餐类型"), account.planType ?? L10n.tr("未知"))
+                if let codexCurrentPeriodEndsAtText {
+                    inspectorRow(L10n.tr("到期/续期时间"), codexCurrentPeriodEndsAtText)
+                }
 
                 if let codexUsageStatusText {
                     inspectorRow(L10n.tr("Codex 使用状态"), codexUsageStatusText)
