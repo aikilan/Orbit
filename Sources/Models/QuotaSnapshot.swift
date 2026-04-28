@@ -6,6 +6,43 @@ struct RateLimitWindowSnapshot: Codable, Hashable, Sendable {
     var resetsAt: Date?
 }
 
+enum QuotaResetCountdownTone: Equatable, Sendable {
+    case normal
+    case warning
+    case danger
+}
+
+struct QuotaResetCountdown: Equatable, Sendable {
+    let text: String
+    let tone: QuotaResetCountdownTone
+
+    init(until resetDate: Date, now: Date = Date()) {
+        let remainingSeconds = max(0, Int(resetDate.timeIntervalSince(now).rounded(.down)))
+        let totalMinutes = remainingSeconds / 60
+        let days = totalMinutes / 1_440
+        let hours = (totalMinutes % 1_440) / 60
+        let minutes = totalMinutes % 60
+
+        text = String(format: "%dd-%02dh-%02dm", days, hours, minutes)
+        if remainingSeconds == 0 || totalMinutes < 300 {
+            tone = .danger
+        } else if totalMinutes < 1_440 {
+            tone = .warning
+        } else {
+            tone = .normal
+        }
+    }
+}
+
+struct CodexQuotaResetCountdowns: Equatable, Sendable {
+    let fiveHour: QuotaResetCountdown?
+    let weekly: QuotaResetCountdown?
+
+    var isEmpty: Bool {
+        fiveHour == nil && weekly == nil
+    }
+}
+
 extension RateLimitWindowSnapshot {
     var normalizedUsedPercent: Double {
         guard usedPercent.isFinite else { return 0 }
@@ -18,6 +55,11 @@ extension RateLimitWindowSnapshot {
 
     var remainingPercentText: String {
         "\(Int(remainingPercent.rounded()))%"
+    }
+
+    func resetCountdown(now: Date = Date()) -> QuotaResetCountdown? {
+        guard let resetsAt else { return nil }
+        return QuotaResetCountdown(until: resetsAt, now: now)
     }
 }
 
@@ -78,6 +120,13 @@ extension QuotaSnapshot {
             return L10n.tr("7d %@", weeklyWindow.remainingPercentText)
         }
         return primary.remainingPercentText
+    }
+
+    func resetCountdowns(now: Date = Date()) -> CodexQuotaResetCountdowns {
+        CodexQuotaResetCountdowns(
+            fiveHour: fiveHourWindow?.resetCountdown(now: now),
+            weekly: weeklyWindow?.resetCountdown(now: now)
+        )
     }
 
     private func closestWindow(

@@ -31,6 +31,20 @@ struct UsageRefreshResult: Sendable {
     }
 }
 
+private extension UsageRefreshResult {
+    func mergingSubscriptionDetails(_ details: SubscriptionDetails) -> UsageRefreshResult {
+        let mergedDetails = details.merged(over: subscriptionDetails)
+        return UsageRefreshResult(
+            snapshot: snapshot,
+            email: email,
+            planType: planType,
+            allowed: allowed,
+            limitReached: limitReached,
+            subscriptionDetails: mergedDetails.hasAnyValue ? mergedDetails : subscriptionDetails
+        )
+    }
+}
+
 final class BrowserOAuthSession: @unchecked Sendable {
     let state: String
     let codeVerifier: String
@@ -131,12 +145,14 @@ enum OAuthClientError: LocalizedError, Equatable {
 struct OAuthClientConfiguration: Sendable {
     var baseURL = URL(string: "https://auth.openai.com")!
     var chatGPTBaseURL = URL(string: "https://chatgpt.com")!
+    var accountCheckBaseURL = URL(string: "https://android.chat.openai.com")!
     var clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
     var authorizePath = "/oauth/authorize"
     var tokenPath = "/oauth/token"
     var deviceStartPath = "/api/accounts/codex/device"
     var deviceTokenPath = "/deviceauth/token"
     var usagePath = "/backend-api/wham/usage"
+    var accountCheckPath = "/backend-api/accounts/check/v4-2023-04-27"
     var callbackHost = "localhost"
     var callbackPort: UInt16 = 1455
     var callbackPath = "/auth/callback"
@@ -304,7 +320,48 @@ final class OAuthClient: @unchecked Sendable {
         try validateHTTP(response: response, data: data)
 
         let usageResponse = try JSONDecoder().decode(UsageResponse.self, from: data)
-        return try buildUsageSnapshot(from: usageResponse)
+        let usageResult = try buildUsageSnapshot(from: usageResponse)
+
+        do {
+            guard let accountCheckDetails = try await fetchAccountCheckSubscriptionDetails(using: validatedPayload) else {
+                return usageResult
+            }
+            return usageResult.mergingSubscriptionDetails(accountCheckDetails)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return usageResult
+        }
+    }
+
+    private func fetchAccountCheckSubscriptionDetails(using payload: CodexAuthPayload) async throws -> SubscriptionDetails? {
+        // 输入：已验证的 ChatGPT OAuth payload；输出：accounts/check 中当前账号的续期/到期日期。
+        var components = URLComponents(
+            url: accountCheckEndpointURL(path: configuration.accountCheckPath),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(
+                name: "timezone_offset_min",
+                value: "\(-TimeZone.current.secondsFromGMT() / 60)"
+            ),
+        ]
+        guard let url = components?.url else {
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(payload.tokens.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(payload.tokens.accountID, forHTTPHeaderField: "ChatGPT-Account-Id")
+        request.setValue("ChatGPT/1.2026.0 Android", forHTTPHeaderField: "User-Agent")
+
+        let (data, response) = try await session.data(for: request)
+        try validateHTTP(response: response, data: data)
+
+        let responseBody = try JSONDecoder().decode(AccountCheckResponse.self, from: data)
+        return responseBody.subscriptionDetails(for: payload.tokens.accountID)
     }
 
     private func buildUsageSnapshot(from usageResponse: UsageResponse) throws -> UsageRefreshResult {
@@ -467,6 +524,10 @@ final class OAuthClient: @unchecked Sendable {
 
     private func chatGPTEndpointURL(path: String) -> URL {
         configuration.chatGPTBaseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+    }
+
+    private func accountCheckEndpointURL(path: String) -> URL {
+        configuration.accountCheckBaseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
     }
 
     private func formBody(_ values: [String: String]) -> Data {
@@ -684,20 +745,10 @@ private struct UsageResponse: Decodable {
                 "limit_reached",
                 "is_limit_reached",
             ]),
-            currentPeriodEndsAt: decodeUnixDate(in: container, keys: ["expires_at"])
+            currentPeriodEndsAt: FlexibleDateDecoder.decode(in: container, keys: ["renews_at", "expires_at"])
         )
 
         return details.hasAnyValue ? details : nil
-    }
-
-    private static func decodeUnixDate(
-        in container: KeyedDecodingContainer<DynamicCodingKey>,
-        keys: [String]
-    ) -> Date? {
-        guard let timestamp = decodeInt(in: container, keys: keys) else {
-            return nil
-        }
-        return Date(timeIntervalSince1970: TimeInterval(timestamp))
     }
 
     private static func decodeString(
@@ -790,6 +841,78 @@ private struct UsageResponse: Decodable {
             }
         }
         return nil
+    }
+
+    private static func normalizedString(_ value: String) -> String? {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
+    }
+}
+
+private struct AccountCheckResponse: Decodable {
+    let accounts: [String: Account]
+
+    func subscriptionDetails(for accountID: String) -> SubscriptionDetails? {
+        accounts[accountID]?.subscriptionDetails
+    }
+
+    struct Account: Decodable {
+        let entitlement: Entitlement?
+
+        var subscriptionDetails: SubscriptionDetails? {
+            entitlement?.subscriptionDetails
+        }
+    }
+
+    struct Entitlement: Decodable {
+        let currentPeriodEndsAt: Date?
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+            currentPeriodEndsAt = FlexibleDateDecoder.decode(in: container, keys: ["renews_at", "expires_at"])
+        }
+
+        var subscriptionDetails: SubscriptionDetails? {
+            let details = SubscriptionDetails(currentPeriodEndsAt: currentPeriodEndsAt)
+            return details.hasAnyValue ? details : nil
+        }
+    }
+}
+
+private enum FlexibleDateDecoder {
+    static func decode(
+        in container: KeyedDecodingContainer<DynamicCodingKey>,
+        keys: [String]
+    ) -> Date? {
+        for key in keys {
+            let codingKey = DynamicCodingKey(key)
+            if let value = try? container.decodeIfPresent(Int.self, forKey: codingKey) {
+                return Date(timeIntervalSince1970: TimeInterval(value))
+            }
+            if let value = try? container.decodeIfPresent(Double.self, forKey: codingKey) {
+                return Date(timeIntervalSince1970: value)
+            }
+            if let value = try? container.decodeIfPresent(String.self, forKey: codingKey),
+               let normalized = normalizedString(value) {
+                if let seconds = Double(normalized) {
+                    return Date(timeIntervalSince1970: seconds)
+                }
+                if let date = iso8601Date(from: normalized) {
+                    return date
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func iso8601Date(from value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) {
+            return date
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
     }
 
     private static func normalizedString(_ value: String) -> String? {

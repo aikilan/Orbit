@@ -584,33 +584,44 @@ private struct AccountListRow: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-            HStack(alignment: .center, spacing: 6) {
-                if isRefreshingStatus {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.64)
-                        .frame(width: 14, height: 14)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .center, spacing: 6) {
+                    if isRefreshingStatus {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.64)
+                            .frame(width: 14, height: 14)
 
-                    Text(L10n.tr("正在刷新账号状态..."))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                } else {
-                    Label(statusSummary ?? fallbackStatusSummary, systemImage: "gauge.with.dots.needle.67percent")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        Text(L10n.tr("正在刷新账号状态..."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    } else {
+                        Label(statusSummary ?? fallbackStatusSummary, systemImage: "gauge.with.dots.needle.67percent")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
 
-                    if let failureStatusMessage {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.red)
-                            .onHover { hovering in
-                                isHoveringFailureIcon = hovering
-                            }
-                            .popover(isPresented: failurePopoverBinding, arrowEdge: .leading) {
-                                AccountFailurePopoverContent(message: failureStatusMessage)
-                            }
+                        if let failureStatusMessage {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.red)
+                                .onHover { hovering in
+                                    isHoveringFailureIcon = hovering
+                                }
+                                .popover(isPresented: failurePopoverBinding, arrowEdge: .leading) {
+                                    AccountFailurePopoverContent(message: failureStatusMessage)
+                                }
+                        }
+                    }
+                }
+
+                if shouldShowCodexResetCountdowns {
+                    TimelineView(.periodic(from: .now, by: 60)) { context in
+                        let countdowns = snapshot?.resetCountdowns(now: context.date)
+                        if let countdowns, !countdowns.isEmpty {
+                            QuotaResetCountdownRow(countdowns: countdowns)
+                        }
                     }
                 }
             }
@@ -670,6 +681,10 @@ private struct AccountListRow: View {
             return L10n.tr("本地 Profile")
         }
         return nil
+    }
+
+    private var shouldShowCodexResetCountdowns: Bool {
+        account.providerRule == .chatgptOAuth && snapshot != nil && !isRefreshingStatus
     }
 
     private var subscriptionRenewalText: String? {
@@ -750,6 +765,45 @@ private struct AccountListRow: View {
     private func claudeRemainingText(_ value: Int?) -> String {
         guard let value else { return L10n.tr("未知") }
         return "\(value)"
+    }
+}
+
+private struct QuotaResetCountdownRow: View {
+    let countdowns: CodexQuotaResetCountdowns
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                countdownText(L10n.tr("5h 重置"), countdowns.fiveHour)
+                countdownText(L10n.tr("7d 重置"), countdowns.weekly)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                countdownText(L10n.tr("5h 重置"), countdowns.fiveHour)
+                countdownText(L10n.tr("7d 重置"), countdowns.weekly)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func countdownText(_ title: String, _ countdown: QuotaResetCountdown?) -> some View {
+        if let countdown {
+            Text("\(title) \(countdown.text)")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(foregroundColor(for: countdown.tone))
+                .lineLimit(1)
+        }
+    }
+
+    private func foregroundColor(for tone: QuotaResetCountdownTone) -> Color {
+        switch tone {
+        case .normal:
+            return Color(nsColor: .secondaryLabelColor)
+        case .warning:
+            return .yellow
+        case .danger:
+            return .red
+        }
     }
 }
 
@@ -1630,12 +1684,18 @@ private struct AccountDetailView: View {
                                 L10n.tr("5 小时重置"),
                                 fiveHourWindow.resetsAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知")
                             )
+                            if let countdown = fiveHourWindow.resetCountdown() {
+                                inspectorRow(L10n.tr("5 小时重置倒计时"), countdown.text)
+                            }
                         }
                         if let weeklyWindow = snapshot.weeklyWindow {
                             inspectorRow(
                                 L10n.tr("7 天重置"),
                                 weeklyWindow.resetsAt?.formatted(date: .abbreviated, time: .standard) ?? L10n.tr("未知")
                             )
+                            if let countdown = weeklyWindow.resetCountdown() {
+                                inspectorRow(L10n.tr("7 天重置倒计时"), countdown.text)
+                            }
                         }
 
                         if let credits = snapshot.credits {

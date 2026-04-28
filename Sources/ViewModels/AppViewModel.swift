@@ -197,7 +197,9 @@ final class AppViewModel: ObservableObject {
     private let claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging
     private let runtimes: [PlatformKind: any PlatformRuntime]
     private let bannerAutoDismissDuration: Duration
+    private let codexSubscriptionQuotaAutoRefreshInterval: Duration?
     private var copilotSessionMonitorTask: Task<Void, Never>?
+    private var codexSubscriptionQuotaAutoRefreshTask: Task<Void, Never>?
     private var browserSession: BrowserOAuthSession?
     private var browserWaitTask: Task<Void, Never>?
     private var bannerDismissTask: Task<Void, Never>?
@@ -242,7 +244,8 @@ final class AppViewModel: ObservableObject {
         openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging = OpenAICompatibleProviderCodexBridgeManager(),
         claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging = ClaudeProviderCodexBridgeManager(),
         platformRuntimes: [any PlatformRuntime] = [CodexPlatformRuntime(), ClaudePlatformRuntime()],
-        bannerAutoDismissDuration: Duration = .seconds(10)
+        bannerAutoDismissDuration: Duration = .seconds(10),
+        codexSubscriptionQuotaAutoRefreshInterval: Duration? = .seconds(300)
     ) {
         self.paths = paths
         self.sessionLogger = sessionLogger
@@ -282,10 +285,12 @@ final class AppViewModel: ObservableObject {
         self.claudeProviderCodexBridgeManager = claudeProviderCodexBridgeManager
         self.runtimes = Dictionary(uniqueKeysWithValues: platformRuntimes.map { ($0.platform, $0) })
         self.bannerAutoDismissDuration = bannerAutoDismissDuration
+        self.codexSubscriptionQuotaAutoRefreshInterval = codexSubscriptionQuotaAutoRefreshInterval
     }
 
     deinit {
         copilotSessionMonitorTask?.cancel()
+        codexSubscriptionQuotaAutoRefreshTask?.cancel()
     }
 
     static func live(sessionLogger: AppSessionLogger? = nil) -> AppViewModel {
@@ -819,6 +824,7 @@ final class AppViewModel: ObservableObject {
 
         await importCurrentAuthIfNeeded()
         startQuotaMonitor()
+        startCodexSubscriptionQuotaAutoRefresh()
         startCopilotSessionMonitorIfNeeded()
         evaluateLowQuotaSwitchRecommendation()
         await refreshCodexDesktopRunningState()
@@ -1169,6 +1175,22 @@ final class AppViewModel: ObservableObject {
             while !Task.isCancelled {
                 await self?.pollCopilotSessionMonitorOnce()
                 try? await Task.sleep(for: .seconds(60))
+            }
+        }
+    }
+
+    private func startCodexSubscriptionQuotaAutoRefresh() {
+        codexSubscriptionQuotaAutoRefreshTask?.cancel()
+        codexSubscriptionQuotaAutoRefreshTask = nil
+
+        guard let codexSubscriptionQuotaAutoRefreshInterval else {
+            return
+        }
+
+        codexSubscriptionQuotaAutoRefreshTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                await self?.refreshCodexSubscriptionQuotasOnce()
+                try? await Task.sleep(for: codexSubscriptionQuotaAutoRefreshInterval)
             }
         }
     }
@@ -2175,6 +2197,27 @@ final class AppViewModel: ObservableObject {
         try? await persistDatabase()
     }
 
+    func refreshCodexSubscriptionQuotasOnce() async {
+        guard !isRefreshingAllStatuses else { return }
+
+        let accountIDs = database.accounts
+            .filter { $0.providerRule == .chatgptOAuth }
+            .map(\.id)
+        var didUpdate = false
+
+        for accountID in accountIDs {
+            guard !Task.isCancelled else { break }
+            let outcome = await refreshCodexSubscriptionQuotaInBackground(accountID: accountID)
+            if outcome != nil {
+                didUpdate = true
+            }
+        }
+
+        guard didUpdate else { return }
+        evaluateLowQuotaSwitchRecommendation()
+        try? await persistDatabase()
+    }
+
     func dismissAddAccountSheet() {
         prepareAddAccountSheet()
     }
@@ -2687,6 +2730,68 @@ final class AppViewModel: ObservableObject {
     }
 
     @discardableResult
+    private func refreshCodexSubscriptionQuotaInBackground(accountID: UUID) async -> AccountStatusRefreshOutcome? {
+        guard !refreshingAccountIDs.contains(accountID),
+              let account = database.account(id: accountID),
+              account.providerRule == .chatgptOAuth else {
+            return nil
+        }
+
+        refreshingAccountIDs.insert(accountID)
+        defer { refreshingAccountIDs.remove(accountID) }
+
+        do {
+            let payload = try latestCodexPayloadForRefresh(for: account)
+            do {
+                let usage = try await oauthClient.fetchUsageSnapshot(using: payload)
+                _ = applyCodexUsageRefresh(usage, for: accountID, fallbackPlanType: account.planType)
+                return .success
+            } catch {
+                guard shouldRetryBackgroundQuotaRefresh(after: error, for: accountID) else {
+                    throw error
+                }
+
+                let refreshed = try await oauthClient.refreshAuth(using: payload)
+                try credentialStore.save(.codex(refreshed.payload), for: accountID)
+                let latestIsActive = database.account(id: accountID)?.isActive ?? account.isActive
+                let refreshedAccount = upsertAccount(
+                    identity: refreshed.identity,
+                    payload: refreshed.payload,
+                    makeActive: latestIsActive
+                )
+                let usage = try await oauthClient.fetchUsageSnapshot(using: refreshed.payload)
+                _ = applyCodexUsageRefresh(
+                    usage,
+                    for: refreshedAccount.id,
+                    fallbackPlanType: refreshed.identity.planType
+                )
+                return .success
+            }
+        } catch {
+            updateStatusMetadata(
+                for: accountID,
+                level: .warning,
+                message: L10n.tr("后台额度同步失败：%@", error.localizedDescription),
+                checkedAt: Date(),
+                planType: database.account(id: accountID)?.planType
+            )
+            return .failure
+        }
+    }
+
+    private func shouldRetryBackgroundQuotaRefresh(after error: Error, for accountID: UUID) -> Bool {
+        guard let oauthError = error as? OAuthClientError,
+              case let .httpFailure(statusCode, _) = oauthError,
+              statusCode == 401 else {
+            return false
+        }
+        guard let latestAccount = database.account(id: accountID), !latestAccount.isActive else {
+            return false
+        }
+        return !hasLaunchedIsolatedInstance(for: accountID)
+    }
+
+    @discardableResult
     private func refreshAccountStatus(accountID: UUID, showBanner: Bool) async -> AccountStatusRefreshOutcome {
         guard !refreshingAccountIDs.contains(accountID), let currentAccount = database.account(id: accountID) else {
             return .failure
@@ -2798,34 +2903,21 @@ final class AppViewModel: ObservableObject {
         let refreshedAccount = upsertAccount(identity: result.identity, payload: result.payload, makeActive: isActive)
         var outcome: AccountStatusRefreshOutcome = .success
         var bannerLevel: SwitchLogLevel = .info
-        var statusMessage = isActive ? L10n.tr("状态已更新，并同步了当前 ~/.codex/auth.json。") : L10n.tr("状态已更新，账号凭据可用。")
         var logMessage = L10n.tr("已手动更新账号 %@ 的状态。", refreshedAccount.displayName)
 
         do {
             let usage = try await oauthClient.fetchUsageSnapshot(using: result.payload)
-            database.updateSnapshot(usage.snapshot, for: refreshedAccount.id)
-            evaluateLowQuotaSwitchRecommendation()
-            updateAccountContactMetadata(for: refreshedAccount.id, email: usage.email, planType: usage.planType)
-            updateSubscriptionMetadata(for: refreshedAccount.id, details: usage.subscriptionDetails)
-
-            let quotaSummary = usage.snapshot.remainingSummary
-            if usage.limitReached || !usage.allowed {
-                statusMessage = L10n.tr("状态与额度已更新：剩余 %@，当前已触达额度限制。", quotaSummary)
-            } else {
-                statusMessage = L10n.tr("状态与额度已更新：剩余 %@。", quotaSummary)
-            }
-            logMessage = L10n.tr("已手动更新账号 %@ 的状态与额度。", refreshedAccount.displayName)
-            updateStatusMetadata(
+            _ = applyCodexUsageRefresh(
+                usage,
                 for: refreshedAccount.id,
-                level: .info,
-                message: statusMessage,
-                checkedAt: Date(),
-                planType: usage.planType ?? result.identity.planType
+                fallbackPlanType: result.identity.planType
             )
+            evaluateLowQuotaSwitchRecommendation()
+            logMessage = L10n.tr("已手动更新账号 %@ 的状态与额度。", refreshedAccount.displayName)
         } catch {
             outcome = .partial
             bannerLevel = .warning
-            statusMessage = L10n.tr("状态已更新，但额度同步失败：%@", error.localizedDescription)
+            let statusMessage = L10n.tr("状态已更新，但额度同步失败：%@", error.localizedDescription)
             logMessage = L10n.tr("已手动更新账号 %@ 的状态，但额度同步失败。", refreshedAccount.displayName)
             updateStatusMetadata(
                 for: refreshedAccount.id,
@@ -3352,6 +3444,29 @@ final class AppViewModel: ObservableObject {
         }
 
         database.accounts[index].subscriptionDetails = details.merged(over: database.accounts[index].subscriptionDetails)
+    }
+
+    private func applyCodexUsageRefresh(
+        _ usage: UsageRefreshResult,
+        for accountID: UUID,
+        fallbackPlanType: String?
+    ) -> String {
+        database.updateSnapshot(usage.snapshot, for: accountID)
+        updateAccountContactMetadata(for: accountID, email: usage.email, planType: usage.planType)
+        updateSubscriptionMetadata(for: accountID, details: usage.subscriptionDetails)
+
+        let quotaSummary = usage.snapshot.remainingSummary
+        let statusMessage = (usage.limitReached || !usage.allowed)
+            ? L10n.tr("状态与额度已更新：剩余 %@，当前已触达额度限制。", quotaSummary)
+            : L10n.tr("状态与额度已更新：剩余 %@。", quotaSummary)
+        updateStatusMetadata(
+            for: accountID,
+            level: .info,
+            message: statusMessage,
+            checkedAt: Date(),
+            planType: usage.planType ?? fallbackPlanType
+        )
+        return statusMessage
     }
 
     @MainActor

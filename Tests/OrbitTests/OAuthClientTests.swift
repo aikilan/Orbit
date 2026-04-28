@@ -67,51 +67,76 @@ final class OAuthClientTests: XCTestCase {
 
     func testFetchUsageSnapshotParsesQuotaAndCredits() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertEqual(request.url?.absoluteString, "https://chatgpt.com/backend-api/wham/usage")
-            XCTAssertEqual(request.httpMethod, "GET")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "ChatGPT-Account-Id"), "acct_usage")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access_usage")
+            switch (request.url?.host, request.url?.path) {
+            case ("chatgpt.com", "/backend-api/wham/usage"):
+                XCTAssertEqual(request.httpMethod, "GET")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "ChatGPT-Account-Id"), "acct_usage")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access_usage")
 
-            let responseBody = """
-            {
-              "email": "usage@example.com",
-              "plan_type": "team",
-              "subscription": {
-                "status": "active",
-                "is_disabled": false,
-                "is_expired": false,
-                "expires_at": 1775126400
-              },
-              "rate_limit": {
-                "allowed": true,
-                "limit_reached": false,
-                "primary_window": {
-                  "used_percent": 12,
-                  "limit_window_seconds": 18000,
-                  "reset_at": 1773908626
-                },
-                "secondary_window": {
-                  "used_percent": 34,
-                  "limit_window_seconds": 604800,
-                  "reset_at": 1774017140
+                let responseBody = """
+                {
+                  "email": "usage@example.com",
+                  "plan_type": "team",
+                  "subscription": {
+                    "status": "active",
+                    "is_disabled": false,
+                    "is_expired": false
+                  },
+                  "rate_limit": {
+                    "allowed": true,
+                    "limit_reached": false,
+                    "primary_window": {
+                      "used_percent": 12,
+                      "limit_window_seconds": 18000,
+                      "reset_at": 1773908626
+                    },
+                    "secondary_window": {
+                      "used_percent": 34,
+                      "limit_window_seconds": 604800,
+                      "reset_at": 1774017140
+                    }
+                  },
+                  "credits": {
+                    "has_credits": true,
+                    "unlimited": false,
+                    "balance": 9.5
+                  }
                 }
-              },
-              "credits": {
-                "has_credits": true,
-                "unlimited": false,
-                "balance": 9.5
-              }
-            }
-            """
+                """
+                return try Self.jsonResponse(for: request, body: responseBody)
 
-            let response = HTTPURLResponse(
-                url: try XCTUnwrap(request.url),
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: ["Content-Type": "application/json"]
-            )!
-            return (response, Data(responseBody.utf8))
+            case ("android.chat.openai.com", "/backend-api/accounts/check/v4-2023-04-27"):
+                XCTAssertEqual(request.httpMethod, "GET")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "ChatGPT-Account-Id"), "acct_usage")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access_usage")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "ChatGPT/1.2026.0 Android")
+                XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?
+                    .queryItems?
+                    .first(where: { $0.name == "timezone_offset_min" })?
+                    .value, "\(-TimeZone.current.secondsFromGMT() / 60)")
+
+                let responseBody = """
+                {
+                  "accounts": {
+                    "acct_usage": {
+                      "entitlement": {
+                        "has_active_subscription": true,
+                        "subscription_plan": "chatgptplusplan",
+                        "renews_at": "2026-05-07T00:00:00+00:00",
+                        "expires_at": "2026-05-07T06:00:00+00:00"
+                      }
+                    }
+                  }
+                }
+                """
+                return try Self.jsonResponse(for: request, body: responseBody)
+
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                throw URLError(.badURL)
+            }
         }
 
         let configuration = URLSessionConfiguration.ephemeral
@@ -143,12 +168,15 @@ final class OAuthClientTests: XCTestCase {
         XCTAssertEqual(result.snapshot.credits?.balance, 9.5)
         XCTAssertEqual(result.subscriptionDetails?.allowed, true)
         XCTAssertEqual(result.subscriptionDetails?.limitReached, false)
-        XCTAssertEqual(result.subscriptionDetails?.currentPeriodEndsAt, Date(timeIntervalSince1970: 1_775_126_400))
+        XCTAssertEqual(result.subscriptionDetails?.currentPeriodEndsAt, Self.iso8601Date("2026-05-07T00:00:00Z"))
     }
 
     func testFetchUsageSnapshotParsesPersonalAccountResponseWithFlexibleFieldTypes() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertEqual(request.url?.absoluteString, "https://chatgpt.com/backend-api/wham/usage")
+            guard request.url?.host == "chatgpt.com",
+                  request.url?.path == "/backend-api/wham/usage" else {
+                return try Self.jsonResponse(for: request, body: #"{"accounts":{}}"#)
+            }
 
             let responseBody = """
             {
@@ -171,13 +199,7 @@ final class OAuthClientTests: XCTestCase {
             }
             """
 
-            let response = HTTPURLResponse(
-                url: try XCTUnwrap(request.url),
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: ["Content-Type": "application/json"]
-            )!
-            return (response, Data(responseBody.utf8))
+            return try Self.jsonResponse(for: request, body: responseBody)
         }
 
         let configuration = URLSessionConfiguration.ephemeral
@@ -208,9 +230,86 @@ final class OAuthClientTests: XCTestCase {
         XCTAssertEqual(result.snapshot.credits?.balance, 9.5)
     }
 
+    func testFetchUsageSnapshotIgnoresAccountCheckFailure() async throws {
+        MockURLProtocol.requestHandler = { request in
+            switch (request.url?.host, request.url?.path) {
+            case ("chatgpt.com", "/backend-api/wham/usage"):
+                let responseBody = """
+                {
+                  "email": "fallback@example.com",
+                  "plan_type": "plus",
+                  "subscription": {
+                    "expires_at": 1775126400
+                  },
+                  "rate_limit": {
+                    "allowed": true,
+                    "limit_reached": false,
+                    "primary_window": {
+                      "used_percent": 10,
+                      "limit_window_seconds": 18000
+                    }
+                  }
+                }
+                """
+                return try Self.jsonResponse(for: request, body: responseBody)
+
+            case ("android.chat.openai.com", "/backend-api/accounts/check/v4-2023-04-27"):
+                let response = HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 403,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "text/html"]
+                )!
+                return (response, Data("<html>forbidden</html>".utf8))
+
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                throw URLError(.badURL)
+            }
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = OAuthClient(session: session)
+
+        let result = try await client.fetchUsageSnapshot(using: CodexAuthPayload(
+            tokens: CodexTokenBundle(
+                idToken: Self.makeUnsignedJWT(claims: [
+                    "https://api.openai.com/auth": ["chatgpt_account_id": "acct_fallback"],
+                ]),
+                accessToken: "access_fallback",
+                refreshToken: "refresh_fallback",
+                accountID: "acct_fallback"
+            ),
+            lastRefresh: CodexDateCoding.string(from: Date())
+        ))
+
+        XCTAssertEqual(result.email, "fallback@example.com")
+        XCTAssertEqual(result.planType, "plus")
+        XCTAssertTrue(result.allowed)
+        XCTAssertFalse(result.limitReached)
+        XCTAssertEqual(result.subscriptionDetails?.currentPeriodEndsAt, Date(timeIntervalSince1970: 1_775_126_400))
+    }
+
     override func tearDown() {
         super.tearDown()
         MockURLProtocol.requestHandler = nil
+    }
+
+    private static func jsonResponse(for request: URLRequest, body: String) throws -> (HTTPURLResponse, Data) {
+        let response = HTTPURLResponse(
+            url: try XCTUnwrap(request.url),
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        return (response, Data(body.utf8))
+    }
+
+    private static func iso8601Date(_ value: String) -> Date {
+        let formatter = ISO8601DateFormatter()
+        return formatter.date(from: value)!
     }
 
     private static func makeUnsignedJWT(claims: [String: Any]) -> String {

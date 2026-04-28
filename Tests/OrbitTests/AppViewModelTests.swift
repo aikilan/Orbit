@@ -973,7 +973,8 @@ final class AppViewModelTests: XCTestCase {
             oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
             quotaMonitor: NoopQuotaMonitor(),
             userNotifier: RecordingUserNotifier(),
-            runtimeInspector: MockRuntimeInspector(result: .verified)
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            codexSubscriptionQuotaAutoRefreshInterval: nil
         )
 
         await model.prepare()
@@ -1148,7 +1149,8 @@ final class AppViewModelTests: XCTestCase {
             oauthClient: MockOAuthClient(refreshResult: .failure(MockError.refreshFailed)),
             quotaMonitor: NoopQuotaMonitor(),
             userNotifier: RecordingUserNotifier(),
-            runtimeInspector: MockRuntimeInspector(result: .verified)
+            runtimeInspector: MockRuntimeInspector(result: .verified),
+            codexSubscriptionQuotaAutoRefreshInterval: nil
         )
 
         await model.prepare()
@@ -3503,6 +3505,237 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(claudeAccount.lastStatusLevel, .info)
     }
 
+    func testCodexSubscriptionQuotaAutoRefreshRefreshesOnlyChatGPTAccounts() async throws {
+        let accountID = UUID()
+        let secondAccountID = UUID()
+        let providerAccountID = UUID()
+        let copilotAccountID = UUID()
+        let primaryPayload = makePayload(accountID: "acct_primary", refreshToken: "refresh_primary")
+        let secondPayload = makePayload(accountID: "acct_second", refreshToken: "refresh_second")
+        let copilotCredential = CopilotCredential(
+            host: "https://github.com",
+            login: "aikilan",
+            accessToken: "copilot_access_token",
+            defaultModel: "gpt-4.1",
+            source: .localImport
+        )
+        let oauthClient = MockOAuthClient(
+            refreshResults: [.failure(MockError.refreshFailed)],
+            usageResults: [
+                .success(makeUsageResult(usedPercent: 12)),
+                .success(makeUsageResult(usedPercent: 20)),
+            ]
+        )
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: primaryPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: oauthClient,
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            extraSeeds: [
+                AccountSeed(
+                    account: ManagedAccount(
+                        id: secondAccountID,
+                        codexAccountID: secondPayload.accountIdentifier,
+                        displayName: "Second User",
+                        email: "second@example.com",
+                        authMode: secondPayload.authMode,
+                        createdAt: Date(),
+                        lastUsedAt: nil,
+                        lastQuotaSnapshotAt: nil,
+                        lastRefreshAt: nil,
+                        planType: nil,
+                        lastStatusCheckAt: nil,
+                        lastStatusMessage: nil,
+                        lastStatusLevel: nil,
+                        isActive: false
+                    ),
+                    payload: .codex(secondPayload),
+                    snapshot: nil
+                ),
+                AccountSeed(
+                    account: makeProviderAccount(
+                        id: providerAccountID,
+                        platform: .codex,
+                        identifier: "provider_openai",
+                        displayName: "OpenAI Provider",
+                        email: "sk-...test",
+                        rule: .openAICompatible,
+                        presetID: "openai",
+                        providerDisplayName: "OpenAI",
+                        baseURL: "https://api.openai.com/v1",
+                        envName: "OPENAI_API_KEY",
+                        model: "gpt-5.4"
+                    ),
+                    payload: try makeProviderCredential("sk-test-auto-refresh-provider"),
+                    snapshot: nil
+                ),
+                AccountSeed(
+                    account: ManagedAccount(
+                        id: copilotAccountID,
+                        platform: .codex,
+                        accountIdentifier: copilotCredential.accountIdentifier,
+                        displayName: "GitHub Copilot • aikilan",
+                        email: copilotCredential.credentialSummary,
+                        authKind: .githubCopilot,
+                        providerRule: .githubCopilot,
+                        providerPresetID: nil,
+                        providerDisplayName: "GitHub Copilot",
+                        providerBaseURL: nil,
+                        providerAPIKeyEnvName: nil,
+                        defaultModel: "gpt-4.1",
+                        defaultCLITarget: .codex,
+                        createdAt: Date(),
+                        lastUsedAt: nil,
+                        lastQuotaSnapshotAt: nil,
+                        lastRefreshAt: nil,
+                        planType: nil,
+                        subscriptionDetails: nil,
+                        lastStatusCheckAt: nil,
+                        lastStatusMessage: nil,
+                        lastStatusLevel: nil,
+                        isActive: false
+                    ),
+                    payload: .copilot(copilotCredential),
+                    snapshot: nil
+                ),
+            ]
+        )
+
+        await harness.model.prepare()
+        await harness.model.refreshCodexSubscriptionQuotasOnce()
+
+        XCTAssertEqual(oauthClient.usagePayloadAccountIDs, ["acct_primary", "acct_second"])
+        XCTAssertEqual(oauthClient.refreshCallCount, 0)
+        XCTAssertNotNil(harness.model.snapshot(for: accountID))
+        XCTAssertNotNil(harness.model.snapshot(for: secondAccountID))
+        XCTAssertNil(harness.model.snapshot(for: providerAccountID))
+        XCTAssertNil(harness.model.copilotQuotaSnapshot(for: copilotAccountID))
+        XCTAssertNil(harness.model.database.account(id: providerAccountID)?.lastStatusCheckAt)
+        XCTAssertNil(harness.model.database.account(id: copilotAccountID)?.lastStatusCheckAt)
+    }
+
+    func testCodexSubscriptionQuotaAutoRefreshRetriesUnauthorizedInactiveAccountWithFreshToken() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let refreshedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_new")
+        let oauthClient = MockOAuthClient(
+            refreshResults: [
+                .success(AuthLoginResult(
+                    payload: refreshedPayload,
+                    identity: AuthIdentity(
+                        accountID: "acct_cached",
+                        displayName: "Refreshed User",
+                        email: "refresh@example.com",
+                        planType: "plus"
+                    )
+                )),
+            ],
+            usageResults: [
+                .failure(OAuthClientError.httpFailure(401, "expired")),
+                .success(makeUsageResult(usedPercent: 18)),
+            ]
+        )
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: oauthClient,
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false)
+        )
+
+        await harness.model.prepare()
+        await harness.model.refreshCodexSubscriptionQuotasOnce()
+
+        XCTAssertEqual(oauthClient.usageCallCount, 2)
+        XCTAssertEqual(oauthClient.refreshCallCount, 1)
+        XCTAssertEqual(try harness.credentialStore.load(for: accountID).tokens.refreshToken, "refresh_new")
+        XCTAssertNotNil(harness.model.snapshot(for: accountID))
+        XCTAssertEqual(harness.model.database.account(id: accountID)?.lastStatusLevel, .info)
+    }
+
+    func testCodexSubscriptionQuotaAutoRefreshDoesNotRotateTokenForActiveAccount() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let oauthClient = MockOAuthClient(
+            refreshResults: [.failure(MockError.refreshFailed)],
+            usageResults: [.failure(OAuthClientError.httpFailure(401, "expired"))]
+        )
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: oauthClient,
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            activeAccountID: accountID
+        )
+
+        await harness.model.prepare()
+        await harness.model.refreshCodexSubscriptionQuotasOnce()
+
+        XCTAssertEqual(oauthClient.usageCallCount, 1)
+        XCTAssertEqual(oauthClient.refreshCallCount, 0)
+        XCTAssertNil(harness.model.snapshot(for: accountID))
+        XCTAssertEqual(try harness.credentialStore.load(for: accountID).tokens.refreshToken, "refresh_old")
+        XCTAssertEqual(harness.model.database.account(id: accountID)?.lastStatusLevel, .warning)
+    }
+
+    func testCodexSubscriptionQuotaAutoRefreshDoesNotRotateTokenForLaunchedIsolatedAccount() async throws {
+        let accountID = UUID()
+        let cachedPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_old")
+        let launchPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_launch")
+        let retryPayload = makePayload(accountID: "acct_cached", refreshToken: "refresh_retry")
+        let launcher = RecordingCodexInstanceLauncher()
+        let oauthClient = MockOAuthClient(
+            refreshResults: [
+                .success(AuthLoginResult(
+                    payload: launchPayload,
+                    identity: AuthIdentity(
+                        accountID: "acct_cached",
+                        displayName: "Launch User",
+                        email: "launch@example.com",
+                        planType: "plus"
+                    )
+                )),
+                .success(AuthLoginResult(
+                    payload: retryPayload,
+                    identity: AuthIdentity(
+                        accountID: "acct_cached",
+                        displayName: "Retry User",
+                        email: "retry@example.com",
+                        planType: "plus"
+                    )
+                )),
+            ],
+            usageResults: [.failure(OAuthClientError.httpFailure(401, "expired"))]
+        )
+
+        let harness = try await makeHarness(
+            accountID: accountID,
+            cachedPayload: cachedPayload,
+            authFileManager: RecordingAuthFileManager(),
+            oauthClient: oauthClient,
+            runtimeInspector: MockRuntimeInspector(result: .noRunningClient, isRunning: false),
+            instanceLauncher: launcher
+        )
+
+        await harness.model.prepare()
+        let account = try XCTUnwrap(harness.model.accounts.first)
+        await harness.model.launchIsolatedCodex(for: account)
+        await harness.model.refreshCodexSubscriptionQuotasOnce()
+
+        XCTAssertEqual(launcher.launchCallCount, 1)
+        XCTAssertTrue(harness.model.hasLaunchedIsolatedInstance(for: accountID))
+        XCTAssertEqual(oauthClient.usageCallCount, 1)
+        XCTAssertEqual(oauthClient.refreshCallCount, 1)
+        XCTAssertEqual(try harness.credentialStore.load(for: accountID).tokens.refreshToken, "refresh_launch")
+        XCTAssertNil(harness.model.snapshot(for: accountID))
+        XCTAssertEqual(harness.model.database.account(id: accountID)?.lastStatusLevel, .warning)
+    }
+
     func testLowQuotaRecommendationNotifiesAndSupportsQuickSwitch() async throws {
         let activeAccountID = UUID()
         let candidateAccountID = UUID()
@@ -4891,6 +5124,7 @@ final class AppViewModelTests: XCTestCase {
         claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging = RecordingClaudeProviderCodexBridgeManager(),
         copilotSessionImporter: (any CopilotSessionQueueImporting)? = nil,
         bannerAutoDismissDuration: Duration = .seconds(10),
+        codexSubscriptionQuotaAutoRefreshInterval: Duration? = nil,
         enableSessionLogger: Bool = false
     ) async throws -> AppViewModelHarness {
         let fileManager = FileManager.default
@@ -5002,7 +5236,8 @@ final class AppViewModelTests: XCTestCase {
             copilotSessionImporter: copilotSessionImporter,
             openAICompatibleProviderCodexBridgeManager: openAICompatibleProviderCodexBridgeManager,
             claudeProviderCodexBridgeManager: claudeProviderCodexBridgeManager,
-            bannerAutoDismissDuration: bannerAutoDismissDuration
+            bannerAutoDismissDuration: bannerAutoDismissDuration,
+            codexSubscriptionQuotaAutoRefreshInterval: codexSubscriptionQuotaAutoRefreshInterval
         )
 
         return AppViewModelHarness(
@@ -5029,6 +5264,28 @@ final class AppViewModelTests: XCTestCase {
 
     private func makeAPIKeyPayload(_ apiKey: String) throws -> CodexAuthPayload {
         try CodexAuthPayload(authMode: .apiKey, openAIAPIKey: apiKey).validated()
+    }
+
+    private func makeUsageResult(
+        usedPercent: Double = 12,
+        planType: String = "plus",
+        capturedAt: Date = Date()
+    ) -> UsageRefreshResult {
+        UsageRefreshResult(
+            snapshot: QuotaSnapshot(
+                primary: RateLimitWindowSnapshot(usedPercent: usedPercent, windowMinutes: 300, resetsAt: nil),
+                secondary: RateLimitWindowSnapshot(usedPercent: 30, windowMinutes: 10080, resetsAt: nil),
+                credits: nil,
+                planType: planType,
+                capturedAt: capturedAt,
+                source: .onlineUsageRefresh
+            ),
+            email: "usage@example.com",
+            planType: planType,
+            allowed: true,
+            limitReached: false,
+            subscriptionDetails: SubscriptionDetails(allowed: true, limitReached: false)
+        )
     }
 
     private func makeProviderCredential(_ apiKey: String) throws -> StoredCredential {
@@ -5252,10 +5509,12 @@ private final class RecordingCopilotCLIInstaller: CopilotCLIInstalling {
 }
 
 private final class MockOAuthClient: @unchecked Sendable, OAuthClienting {
-    let refreshResult: Result<AuthLoginResult, Error>
-    let usageResult: Result<UsageRefreshResult, Error>
     let browserLoginResult: Result<AuthLoginResult, Error>
+    private var refreshResults: [Result<AuthLoginResult, Error>]
+    private var usageResults: [Result<UsageRefreshResult, Error>]
     private(set) var refreshCallCount = 0
+    private(set) var usageCallCount = 0
+    private(set) var usagePayloadAccountIDs: [String] = []
     private(set) var beginBrowserLoginCallCount = 0
     private(set) var completeBrowserLoginCallCount = 0
     private(set) var manualCompleteBrowserLoginCallCount = 0
@@ -5265,8 +5524,18 @@ private final class MockOAuthClient: @unchecked Sendable, OAuthClienting {
         usageResult: Result<UsageRefreshResult, Error> = .failure(MockError.unused),
         browserLoginResult: Result<AuthLoginResult, Error> = .failure(MockError.unused)
     ) {
-        self.refreshResult = refreshResult
-        self.usageResult = usageResult
+        self.refreshResults = [refreshResult]
+        self.usageResults = [usageResult]
+        self.browserLoginResult = browserLoginResult
+    }
+
+    init(
+        refreshResults: [Result<AuthLoginResult, Error>],
+        usageResults: [Result<UsageRefreshResult, Error>],
+        browserLoginResult: Result<AuthLoginResult, Error> = .failure(MockError.unused)
+    ) {
+        self.refreshResults = refreshResults
+        self.usageResults = usageResults
         self.browserLoginResult = browserLoginResult
     }
 
@@ -5305,11 +5574,33 @@ private final class MockOAuthClient: @unchecked Sendable, OAuthClienting {
 
     func refreshAuth(using payload: CodexAuthPayload) async throws -> AuthLoginResult {
         refreshCallCount += 1
-        return try refreshResult.get()
+        return try nextRefreshResult().get()
     }
 
     func fetchUsageSnapshot(using payload: CodexAuthPayload) async throws -> UsageRefreshResult {
-        try usageResult.get()
+        usageCallCount += 1
+        usagePayloadAccountIDs.append(payload.accountIdentifier)
+        return try nextUsageResult().get()
+    }
+
+    private func nextRefreshResult() -> Result<AuthLoginResult, Error> {
+        guard !refreshResults.isEmpty else {
+            return .failure(MockError.unused)
+        }
+        if refreshResults.count == 1 {
+            return refreshResults[0]
+        }
+        return refreshResults.removeFirst()
+    }
+
+    private func nextUsageResult() -> Result<UsageRefreshResult, Error> {
+        guard !usageResults.isEmpty else {
+            return .failure(MockError.unused)
+        }
+        if usageResults.count == 1 {
+            return usageResults[0]
+        }
+        return usageResults.removeFirst()
     }
 }
 

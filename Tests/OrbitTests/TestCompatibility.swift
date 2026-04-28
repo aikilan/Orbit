@@ -337,7 +337,8 @@ extension AppViewModel {
         copilotSessionImporter: (any CopilotSessionQueueImporting)? = nil,
         openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging = NoopOpenAICompatibleProviderCodexBridgeManager(),
         claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging = NoopClaudeProviderCodexBridgeManager(),
-        bannerAutoDismissDuration: Duration = .seconds(10)
+        bannerAutoDismissDuration: Duration = .seconds(10),
+        codexSubscriptionQuotaAutoRefreshInterval: Duration? = nil
     ) {
         self.init(
             paths: paths,
@@ -370,7 +371,8 @@ extension AppViewModel {
             copilotSessionImporter: copilotSessionImporter,
             openAICompatibleProviderCodexBridgeManager: openAICompatibleProviderCodexBridgeManager,
             claudeProviderCodexBridgeManager: claudeProviderCodexBridgeManager,
-            bannerAutoDismissDuration: bannerAutoDismissDuration
+            bannerAutoDismissDuration: bannerAutoDismissDuration,
+            codexSubscriptionQuotaAutoRefreshInterval: codexSubscriptionQuotaAutoRefreshInterval
         )
     }
 }
