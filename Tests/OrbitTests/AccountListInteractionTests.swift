@@ -62,6 +62,34 @@ final class AccountListInteractionTests: XCTestCase {
         XCTAssertEqual(reordered, [first, second, third])
     }
 
+    func testDestinationAccountIDUsesPreviousItemWhenDraggingDown() {
+        let first = UUID()
+        let second = UUID()
+        let third = UUID()
+
+        let destination = AccountListReorderLogic.destinationAccountID(
+            currentOrder: [first, second, third],
+            previewOrder: [first, third, second],
+            draggedAccountID: second
+        )
+
+        XCTAssertEqual(destination, third)
+    }
+
+    func testDestinationAccountIDUsesNextItemWhenDraggingUp() {
+        let first = UUID()
+        let second = UUID()
+        let third = UUID()
+
+        let destination = AccountListReorderLogic.destinationAccountID(
+            currentOrder: [first, second, third],
+            previewOrder: [third, first, second],
+            draggedAccountID: third
+        )
+
+        XCTAssertEqual(destination, first)
+    }
+
     func testAutoScrollVelocityIsZeroInCenterRegion() {
         XCTAssertEqual(
             AccountListAutoScrollLogic.velocity(pointerY: 160, viewportHeight: 320),

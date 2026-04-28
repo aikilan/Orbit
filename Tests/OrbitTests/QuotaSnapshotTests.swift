@@ -10,7 +10,7 @@ final class QuotaSnapshotTests: XCTestCase {
             now: now
         )
 
-        XCTAssertEqual(countdown.text, "2d")
+        XCTAssertEqual(countdown.text, ">=2d")
         XCTAssertEqual(countdown.tone, .normal)
     }
 
@@ -18,6 +18,17 @@ final class QuotaSnapshotTests: XCTestCase {
         let now = Date(timeIntervalSince1970: 1_000)
         let countdown = QuotaResetCountdown(
             until: now.addingTimeInterval((6 * 60 + 15) * 60),
+            now: now
+        )
+
+        XCTAssertEqual(countdown.text, ">=6h")
+        XCTAssertEqual(countdown.tone, .normal)
+    }
+
+    func testResetCountdownKeepsExactHourlyRemainingTimeUnprefixed() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let countdown = QuotaResetCountdown(
+            until: now.addingTimeInterval(6 * 60 * 60),
             now: now
         )
 
@@ -96,9 +107,9 @@ final class QuotaSnapshotTests: XCTestCase {
 
         let countdowns = snapshot.resetCountdowns(now: now)
 
-        XCTAssertEqual(countdowns.fiveHour?.text, "4h")
+        XCTAssertEqual(countdowns.fiveHour?.text, ">=4h")
         XCTAssertEqual(countdowns.fiveHour?.tone, .normal)
-        XCTAssertEqual(countdowns.weekly?.text, "6d")
+        XCTAssertEqual(countdowns.weekly?.text, ">=6d")
         XCTAssertEqual(countdowns.weekly?.tone, .normal)
     }
 }

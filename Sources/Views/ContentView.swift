@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 private enum SidebarLayoutMetrics {
     static let minWidth: CGFloat = 272
@@ -19,6 +18,11 @@ struct ContentView: View {
     @State private var draggedAccountID: UUID?
     @State private var dropTargetAccountID: UUID?
     @State private var hoveredAccountID: UUID?
+    @State private var accountRowFrames: [UUID: CGRect] = [:]
+    @State private var accountDragStartFrame: CGRect?
+    @State private var accountDragTranslation: CGSize = .zero
+    @State private var hasAccountOrderChangesDuringDrag = false
+    private let accountListCoordinateSpaceName = "account-list-coordinate-space"
 
     var body: some View {
         HSplitView {
@@ -166,29 +170,26 @@ struct ContentView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 8) {
                 ForEach(model.accounts) { account in
-                    Button {
+                    AccountListRow(
+                        account: account,
+                        snapshot: model.snapshot(for: account.id),
+                        claudeSnapshot: model.claudeRateLimitSnapshot(for: account.id),
+                        copilotSnapshot: model.copilotQuotaSnapshot(for: account.id),
+                        isSelected: resolvedSelectedAccountID == account.id,
+                        isDropTarget: dropTargetAccountID == account.id,
+                        isHovering: hoveredAccountID == account.id,
+                        isDragging: draggedAccountID == account.id,
+                        isRefreshingStatus: model.isRefreshingStatus(for: account.id)
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(accountRowFrameReader(for: account.id))
+                    .offset(y: accountDragVisualOffsetY(for: account.id))
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        guard draggedAccountID == nil else { return }
                         model.selectedAccountID = account.id
-                    } label: {
-                        AccountListRow(
-                            account: account,
-                            snapshot: model.snapshot(for: account.id),
-                            claudeSnapshot: model.claudeRateLimitSnapshot(for: account.id),
-                            copilotSnapshot: model.copilotQuotaSnapshot(for: account.id),
-                            isSelected: resolvedSelectedAccountID == account.id,
-                            isDropTarget: dropTargetAccountID == account.id,
-                            isHovering: hoveredAccountID == account.id,
-                            isDragging: draggedAccountID == account.id,
-                            isRefreshingStatus: model.isRefreshingStatus(for: account.id)
-                        )
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .onDrag {
-                        draggedAccountID = account.id
-                        dropTargetAccountID = nil
-                        return NSItemProvider(object: account.id.uuidString as NSString)
-                    }
+                    .simultaneousGesture(accountReorderGesture(for: account))
                     .onHover { hovering in
                         if hovering {
                             hoveredAccountID = account.id
@@ -196,20 +197,6 @@ struct ContentView: View {
                             hoveredAccountID = nil
                         }
                     }
-                    .onDrop(
-                        of: [UTType.plainText],
-                        delegate: AccountListReorderDropDelegate(
-                            destinationAccountID: account.id,
-                            draggedAccountID: $draggedAccountID,
-                            dropTargetAccountID: $dropTargetAccountID,
-                            onMove: { sourceAccountID, destinationAccountID in
-                                model.moveAccount(sourceAccountID, to: destinationAccountID, persist: false)
-                            },
-                            onCommit: {
-                                model.persistAccountOrder()
-                            }
-                        )
-                    )
                     .zIndex(draggedAccountID == account.id ? 1 : 0)
                     .contextMenu {
                         Button(account.isActive ? L10n.tr("当前正在使用") : L10n.tr("切换到此账号")) {
@@ -236,6 +223,12 @@ struct ContentView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .coordinateSpace(name: accountListCoordinateSpaceName)
+        .onPreferenceChange(AccountRowFramePreferenceKey.self) { frames in
+            Task { @MainActor in
+                accountRowFrames = frames
+            }
         }
         .background(OrbitPalette.sidebar)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -507,6 +500,108 @@ struct ContentView: View {
     private func presentReauthorizeWindow(for accountID: UUID) {
         model.openReauthorize(for: accountID)
         presentWindow(id: "add-account")
+    }
+
+    private func accountRowFrameReader(for accountID: UUID) -> some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: AccountRowFramePreferenceKey.self,
+                value: [accountID: proxy.frame(in: .named(accountListCoordinateSpaceName))]
+            )
+        }
+    }
+
+    // 核心拖拽方法：整卡接收 DragGesture，用卡片中点跨过相邻卡片中线作为重排阈值。
+    private func accountReorderGesture(for account: ManagedAccount) -> some Gesture {
+        DragGesture(minimumDistance: 6, coordinateSpace: .named(accountListCoordinateSpaceName))
+            .onChanged { value in
+                guard model.accounts.count > 1 else { return }
+                beginAccountDragIfNeeded(account.id)
+                guard draggedAccountID == account.id else { return }
+
+                accountDragTranslation = value.translation
+                if accountDragStartFrame == nil {
+                    accountDragStartFrame = accountRowFrames[account.id]
+                }
+                guard let startFrame = accountDragStartFrame else { return }
+                updateAccountOrderDuringDrag(
+                    draggedAccountID: account.id,
+                    draggedMidY: startFrame.midY + value.translation.height
+                )
+            }
+            .onEnded { _ in
+                finishAccountDrag()
+            }
+    }
+
+    private func beginAccountDragIfNeeded(_ accountID: UUID) {
+        guard draggedAccountID == nil else { return }
+        draggedAccountID = accountID
+        accountDragStartFrame = accountRowFrames[accountID]
+        accountDragTranslation = .zero
+        dropTargetAccountID = nil
+        hasAccountOrderChangesDuringDrag = false
+    }
+
+    private func updateAccountOrderDuringDrag(draggedAccountID: UUID, draggedMidY: CGFloat) {
+        let currentOrder = model.accounts.map(\.id)
+        let previewOrder = AccountListReorderLogic.previewOrder(
+            currentOrder: currentOrder,
+            draggedAccountID: draggedAccountID,
+            draggedMidY: draggedMidY,
+            rowFrames: accountRowFrames
+        )
+        guard previewOrder != currentOrder else {
+            dropTargetAccountID = nil
+            return
+        }
+        guard let destinationAccountID = AccountListReorderLogic.destinationAccountID(
+            currentOrder: currentOrder,
+            previewOrder: previewOrder,
+            draggedAccountID: draggedAccountID
+        ) else {
+            return
+        }
+
+        dropTargetAccountID = destinationAccountID
+        hasAccountOrderChangesDuringDrag = true
+        withAnimation(.interactiveSpring(response: 0.24, dampingFraction: 0.88)) {
+            model.moveAccount(draggedAccountID, to: destinationAccountID, persist: false)
+        }
+    }
+
+    private func accountDragVisualOffsetY(for accountID: UUID) -> CGFloat {
+        guard draggedAccountID == accountID else { return 0 }
+        guard
+            let startFrame = accountDragStartFrame,
+            let currentFrame = accountRowFrames[accountID]
+        else {
+            return accountDragTranslation.height
+        }
+
+        return accountDragTranslation.height - (currentFrame.minY - startFrame.minY)
+    }
+
+    private func finishAccountDrag() {
+        let shouldPersistOrder = hasAccountOrderChangesDuringDrag
+        withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.9)) {
+            draggedAccountID = nil
+            dropTargetAccountID = nil
+            accountDragStartFrame = nil
+            accountDragTranslation = .zero
+            hasAccountOrderChangesDuringDrag = false
+        }
+        if shouldPersistOrder {
+            model.persistAccountOrder()
+        }
+    }
+}
+
+private struct AccountRowFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
     }
 }
 
@@ -817,8 +912,8 @@ private struct CodexQuotaInfoPanel: View {
             title: L10n.tr("剩余"),
             fiveHourText: snapshot.fiveHourWindow.map { "5h \($0.remainingPercentText)" },
             weeklyText: snapshot.weeklyWindow.map { "7d \($0.remainingPercentText)" },
-            fiveHourColor: OrbitPalette.accent,
-            weeklyColor: .green
+            fiveHourColor: .secondary,
+            weeklyColor: .secondary
         )
     }
 
@@ -828,8 +923,8 @@ private struct CodexQuotaInfoPanel: View {
             title: L10n.tr("重置时间"),
             fiveHourText: countdowns.fiveHour.map { L10n.tr("%@ 后", $0.text) },
             weeklyText: countdowns.weekly.map { L10n.tr("%@ 后", $0.text) },
-            fiveHourColor: countdowns.fiveHour.map { foregroundColor(for: $0.tone, normalColor: OrbitPalette.accent) } ?? OrbitPalette.accent,
-            weeklyColor: countdowns.weekly.map { foregroundColor(for: $0.tone, normalColor: .green) } ?? .green
+            fiveHourColor: countdowns.fiveHour.map { foregroundColor(for: $0.tone) } ?? .secondary,
+            weeklyColor: countdowns.weekly.map { foregroundColor(for: $0.tone) } ?? .secondary
         )
     }
 
@@ -902,74 +997,15 @@ private struct CodexQuotaInfoPanel: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func foregroundColor(for tone: QuotaResetCountdownTone, normalColor: Color) -> Color {
+    private func foregroundColor(for tone: QuotaResetCountdownTone) -> Color {
         switch tone {
         case .normal:
-            return normalColor
+            return .secondary
         case .warning:
             return .yellow
         case .danger:
             return .red
         }
-    }
-}
-
-private struct AccountListReorderDropDelegate: DropDelegate {
-    let destinationAccountID: UUID
-    @Binding var draggedAccountID: UUID?
-    @Binding var dropTargetAccountID: UUID?
-    let onMove: (UUID, UUID) -> Void
-    let onCommit: () -> Void
-
-    func validateDrop(info: DropInfo) -> Bool {
-        draggedAccountID != nil
-    }
-
-    func dropEntered(info: DropInfo) {
-        guard let draggedAccountID, draggedAccountID != destinationAccountID else { return }
-        guard dropTargetAccountID != destinationAccountID else { return }
-        dropTargetAccountID = destinationAccountID
-        withAnimation(.interactiveSpring(response: 0.24, dampingFraction: 0.88)) {
-            onMove(draggedAccountID, destinationAccountID)
-        }
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        guard let draggedAccountID, draggedAccountID != destinationAccountID else {
-            return DropProposal(operation: .cancel)
-        }
-        if dropTargetAccountID != destinationAccountID {
-            dropTargetAccountID = destinationAccountID
-            withAnimation(.interactiveSpring(response: 0.24, dampingFraction: 0.88)) {
-                onMove(draggedAccountID, destinationAccountID)
-            }
-        }
-        return DropProposal(operation: .move)
-    }
-
-    func dropExited(info: DropInfo) {
-        if dropTargetAccountID == destinationAccountID {
-            dropTargetAccountID = nil
-        }
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        defer {
-            draggedAccountID = nil
-            dropTargetAccountID = nil
-        }
-
-        guard let draggedAccountID else {
-            return false
-        }
-
-        if draggedAccountID != destinationAccountID, dropTargetAccountID != destinationAccountID {
-            withAnimation(.interactiveSpring(response: 0.24, dampingFraction: 0.88)) {
-                onMove(draggedAccountID, destinationAccountID)
-            }
-        }
-        onCommit()
-        return true
     }
 }
 

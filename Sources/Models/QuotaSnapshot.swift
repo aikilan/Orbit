@@ -28,13 +28,13 @@ struct QuotaResetCountdown: Equatable, Sendable {
         let hours = totalMinutes / 60
         let minutes = totalMinutes
 
-        // 输出只保留当前量级，避免列表里倒计时信息过长影响账号扫描效率。
+        // 输出只保留当前量级；省略低位单位时加 >=，避免把近似值误读成精确剩余时间。
         if days >= 1 {
-            text = "\(days)d"
+            text = Self.displayText(value: days, unit: "d", remainingSeconds: remainingSeconds, unitSeconds: 86_400)
         } else if hours >= 1 {
-            text = "\(hours)h"
+            text = Self.displayText(value: hours, unit: "h", remainingSeconds: remainingSeconds, unitSeconds: 3_600)
         } else {
-            text = "\(minutes)m"
+            text = Self.displayText(value: minutes, unit: "m", remainingSeconds: remainingSeconds, unitSeconds: 60)
         }
 
         if remainingSeconds == 0 || totalMinutes < dangerThresholdMinutes {
@@ -44,6 +44,12 @@ struct QuotaResetCountdown: Equatable, Sendable {
         } else {
             tone = .normal
         }
+    }
+
+    private static func displayText(value: Int, unit: String, remainingSeconds: Int, unitSeconds: Int) -> String {
+        guard value > 0 else { return "0m" }
+        let isExact = remainingSeconds == value * unitSeconds
+        return "\(isExact ? "" : ">=")\(value)\(unit)"
     }
 }
 

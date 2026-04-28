@@ -19,6 +19,28 @@ enum AccountListReorderLogic {
         preview.insert(draggedAccountID, at: insertionIndex)
         return preview
     }
+
+    // 输入：当前顺序和预览顺序；输出：传给数据库 moveAccount 的目标账号。
+    static func destinationAccountID(
+        currentOrder: [UUID],
+        previewOrder: [UUID],
+        draggedAccountID: UUID
+    ) -> UUID? {
+        guard
+            let sourceIndex = currentOrder.firstIndex(of: draggedAccountID),
+            let targetIndex = previewOrder.firstIndex(of: draggedAccountID),
+            sourceIndex != targetIndex
+        else {
+            return nil
+        }
+
+        if targetIndex < sourceIndex {
+            let destinationIndex = targetIndex + 1
+            return previewOrder.indices.contains(destinationIndex) ? previewOrder[destinationIndex] : nil
+        }
+        let destinationIndex = targetIndex - 1
+        return previewOrder.indices.contains(destinationIndex) ? previewOrder[destinationIndex] : nil
+    }
 }
 
 enum AccountListAutoScrollLogic {
