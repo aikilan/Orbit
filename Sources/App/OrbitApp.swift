@@ -41,6 +41,12 @@ struct OrbitApp: App {
                 .preferredColorScheme(preferredColorScheme)
                 .frame(minWidth: 980, minHeight: 640)
         }
+
+        Window(L10n.tr("Bridge 调试"), id: "provider-bridge-debug") {
+            ProviderBridgeDebugView(store: model.providerBridgeDebugStore)
+                .preferredColorScheme(preferredColorScheme)
+                .frame(minWidth: 980, minHeight: 640)
+        }
     }
 
     private var preferredColorScheme: ColorScheme? {

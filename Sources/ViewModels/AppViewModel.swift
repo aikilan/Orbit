@@ -167,6 +167,7 @@ final class AppViewModel: ObservableObject {
     let paths: AppPaths
     let sessionLogger: AppSessionLogger?
     let copilotACPDebugStore: CopilotACPDebugStore
+    let providerBridgeDebugStore: ProviderBridgeDebugStore
 
     private let databaseStore: AppDatabaseStore
     private let credentialStore: any AccountCredentialStore
@@ -243,6 +244,7 @@ final class AppViewModel: ObservableObject {
         copilotResponsesBridgeManager: any CopilotResponsesBridgeManaging,
         copilotSessionImporter: (any CopilotSessionQueueImporting)? = nil,
         copilotACPDebugStore: CopilotACPDebugStore = CopilotACPDebugStore(),
+        providerBridgeDebugStore: ProviderBridgeDebugStore = ProviderBridgeDebugStore(),
         openAICompatibleProviderCodexBridgeManager: any OpenAICompatibleProviderCodexBridgeManaging = OpenAICompatibleProviderCodexBridgeManager(),
         claudeProviderCodexBridgeManager: any ClaudeProviderCodexBridgeManaging = ClaudeProviderCodexBridgeManager(),
         claudeCompatibleProviderProxyManager: any ClaudeCompatibleProviderProxyManaging = ClaudeCompatibleProviderProxyManager(),
@@ -253,6 +255,7 @@ final class AppViewModel: ObservableObject {
         self.paths = paths
         self.sessionLogger = sessionLogger
         self.copilotACPDebugStore = copilotACPDebugStore
+        self.providerBridgeDebugStore = providerBridgeDebugStore
         self.databaseStore = databaseStore
         self.credentialStore = credentialStore
         self.authFileManager = authFileManager
@@ -338,6 +341,7 @@ final class AppViewModel: ObservableObject {
             let userNotifier = UserNotificationManager()
             let runtimeInspector = CodexRuntimeInspector(logReader: logReader)
             let copilotACPDebugStore = CopilotACPDebugStore()
+            let providerBridgeDebugStore = ProviderBridgeDebugStore()
             sessionLogger?.info("runtime_inspector.init", metadata: ["state_database_path": paths.stateDatabaseURL.path])
             return AppViewModel(
                 paths: paths,
@@ -368,7 +372,8 @@ final class AppViewModel: ObservableObject {
                 codexOAuthClaudeBridgeManager: CodexOAuthClaudeBridgeManager(),
                 copilotResponsesBridgeManager: CopilotResponsesBridgeManager(debugStore: copilotACPDebugStore),
                 copilotACPDebugStore: copilotACPDebugStore,
-                openAICompatibleProviderCodexBridgeManager: OpenAICompatibleProviderCodexBridgeManager(),
+                providerBridgeDebugStore: providerBridgeDebugStore,
+                openAICompatibleProviderCodexBridgeManager: OpenAICompatibleProviderCodexBridgeManager(debugStore: providerBridgeDebugStore),
                 claudeProviderCodexBridgeManager: ClaudeProviderCodexBridgeManager(),
                 claudeCompatibleProviderProxyManager: ClaudeCompatibleProviderProxyManager(),
                 platformRuntimes: [CodexPlatformRuntime(), ClaudePlatformRuntime()]
@@ -3947,6 +3952,12 @@ final class AppViewModel: ObservableObject {
         addAccountProviderModelSettings[index].topP = topP
     }
 
+    func updateProviderModelMultimodalModel(at index: Int, model: String) {
+        guard addAccountProviderModelSettings.indices.contains(index) else { return }
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        addAccountProviderModelSettings[index].multimodalModel = trimmed.isEmpty ? nil : trimmed
+    }
+
     func selectDefaultProviderModel(_ model: String) {
         addAccountDefaultModel = model
     }
@@ -3981,7 +3992,8 @@ final class AppViewModel: ObservableObject {
                 ProviderModelSettings(
                     model: model,
                     temperature: setting.temperature,
-                    topP: setting.topP
+                    topP: setting.topP,
+                    multimodalModel: setting.normalizedMultimodalModel
                 )
             )
         }

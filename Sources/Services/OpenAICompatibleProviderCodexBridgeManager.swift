@@ -17,16 +17,20 @@ enum OpenAICompatibleProviderCodexBridgeManagerError: LocalizedError, Equatable 
 
 actor OpenAICompatibleProviderCodexBridgeManager {
     private let sendUpstreamRequest: @Sendable (String, String, Data) async throws -> (Int, Data)
+    private let debugStore: ProviderBridgeDebugStore?
     private var servers: [String: OpenAICompatibleProviderCodexBridgeServer] = [:]
 
-    init() {
+    init(debugStore: ProviderBridgeDebugStore? = nil) {
         self.sendUpstreamRequest = Self.sendUpstreamRequest
+        self.debugStore = debugStore
     }
 
     init(
-        sendUpstreamRequest: @escaping @Sendable (String, String, Data) async throws -> (Int, Data)
+        sendUpstreamRequest: @escaping @Sendable (String, String, Data) async throws -> (Int, Data),
+        debugStore: ProviderBridgeDebugStore? = nil
     ) {
         self.sendUpstreamRequest = sendUpstreamRequest
+        self.debugStore = debugStore
     }
 
     func prepareBridge(
@@ -47,7 +51,7 @@ actor OpenAICompatibleProviderCodexBridgeManager {
         }
 
         let server = servers[accountID.uuidString]
-            ?? OpenAICompatibleProviderCodexBridgeServer(sendUpstreamRequest: sendUpstreamRequest)
+            ?? OpenAICompatibleProviderCodexBridgeServer(sendUpstreamRequest: sendUpstreamRequest, debugStore: debugStore)
         server.update(
             baseURL: trimmedBaseURL,
             apiKeyEnvName: apiKeyEnvName.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -101,9 +105,20 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
         let body: Data
     }
 
+    private struct State {
+        let baseURL: String
+        let bridgeBaseURL: String
+        let apiKeyEnvName: String
+        let apiKey: String
+        let defaultModel: String
+        let availableModels: [String]
+        let modelSettings: [ProviderModelSettings]
+    }
+
     private let queue = DispatchQueue(label: "com.openai.Orbit.openai-compatible-provider-bridge")
     private let stateQueue = DispatchQueue(label: "com.openai.Orbit.openai-compatible-provider-bridge.state")
     private let sendUpstreamRequest: @Sendable (String, String, Data) async throws -> (Int, Data)
+    private let debugStore: ProviderBridgeDebugStore?
     private let overloadRetryDelaysNanos: [UInt64] = [200_000_000, 500_000_000]
 
     private var listener: NWListener?
@@ -116,9 +131,11 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
     private var modelSettings = [ProviderModelSettings(model: "gpt-5.4")]
 
     init(
-        sendUpstreamRequest: @escaping @Sendable (String, String, Data) async throws -> (Int, Data)
+        sendUpstreamRequest: @escaping @Sendable (String, String, Data) async throws -> (Int, Data),
+        debugStore: ProviderBridgeDebugStore?
     ) {
         self.sendUpstreamRequest = sendUpstreamRequest
+        self.debugStore = debugStore
     }
 
     func update(
@@ -288,39 +305,163 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
     }
 
     private func responsesResponse(for request: HTTPRequest) async -> HTTPResponse {
+        let requestID = UUID()
+        var didStartDebugRequest = false
+
         do {
             let state = currentState()
-            let requestObject = try requestJSONObject(from: request.body)
+            var requestObject = try requestJSONObject(from: request.body)
             let wantsStream = (requestObject["stream"] as? Bool) ?? false
+            let requestedModel = trimmedString(requestObject["model"])
+            let effectiveModel = resolvedProviderModel(requestedModel, state: state)
+            requestObject["model"] = effectiveModel
             let usesMiniMaxReasoning = isMiniMaxAPIHost(state.baseURL)
             let usesMiMoCompatibility = isMiMoAPIHost(state.baseURL)
             let usesReasoningContent = isDeepSeekAPIHost(state.baseURL) || usesMiMoCompatibility
-            let upstreamRequest = try ResponsesChatCompletionsBridge.makeChatCompletionsRequestData(
-                from: request.body,
-                fallbackModel: state.defaultModel,
-                requiresNonEmptyToolParameters: usesMiniMaxReasoning,
-                usesMaxCompletionTokens: usesMiMoCompatibility,
-                supportsParallelToolCalls: !usesMiMoCompatibility,
-                usesMiniMaxReasoning: usesMiniMaxReasoning,
-                usesDeepSeekReasoning: usesReasoningContent
+            let hasMedia = ResponsesChatCompletionsBridge.containsSupportedMedia(in: requestObject)
+            let multimodalModel = ProviderModelSettings.parameters(
+                for: effectiveModel,
+                in: state.modelSettings,
+                fallbackModel: state.defaultModel
+            )?.normalizedMultimodalModel
+            let upstreamRequest: Data
+
+            await recordDebugRequestStarted(
+                id: requestID,
+                state: state,
+                path: request.path,
+                model: effectiveModel,
+                stream: wantsStream,
+                hasMedia: hasMedia,
+                multimodalModel: multimodalModel,
+                payloadPreview: Self.payloadPreview(from: request.body)
             )
+            didStartDebugRequest = true
+            await appendDebugEvent(
+                requestID: requestID,
+                title: L10n.tr("Bridge 分析"),
+                detail: debugAnalysisDetail(hasMedia: hasMedia, multimodalModel: multimodalModel),
+                payloadPreview: nil
+            )
+            if let requestedModel, requestedModel != effectiveModel {
+                await appendDebugEvent(
+                    requestID: requestID,
+                    title: L10n.tr("模型归一化"),
+                    detail: "\(requestedModel) -> \(effectiveModel)",
+                    payloadPreview: nil
+                )
+            }
+
+            // 有附件且配置了关联模型时，先把附件解析成文本，再交给主模型执行工具调用。
+            if let multimodalModel, hasMedia {
+                let prepassRequest = try ResponsesChatCompletionsBridge.makeMultimodalPrepassRequestData(
+                    from: requestObject,
+                    multimodalModel: multimodalModel,
+                    fallbackModel: multimodalModel,
+                    requiresNonEmptyToolParameters: usesMiniMaxReasoning,
+                    usesMaxCompletionTokens: usesMiMoCompatibility,
+                    supportsParallelToolCalls: !usesMiMoCompatibility,
+                    usesMiniMaxReasoning: usesMiniMaxReasoning,
+                    usesDeepSeekReasoning: usesReasoningContent
+                )
+                let parameterizedPrepassRequest = try ProviderModelSettings.applyParameters(
+                    toJSONData: prepassRequest,
+                    requestedModel: multimodalModel,
+                    settings: state.modelSettings,
+                    fallbackModel: state.defaultModel
+                )
+                await appendDebugEvent(
+                    requestID: requestID,
+                    title: L10n.tr("多模态预处理请求"),
+                    detail: "model=\(multimodalModel)",
+                    payloadPreview: Self.payloadPreview(from: parameterizedPrepassRequest)
+                )
+                let (prepassStatusCode, prepassData) = try await sendUpstreamRequestHandlingOverload(
+                    baseURL: state.baseURL,
+                    apiKey: state.apiKey,
+                    body: parameterizedPrepassRequest
+                )
+                await appendDebugEvent(
+                    requestID: requestID,
+                    title: L10n.tr("多模态预处理响应"),
+                    detail: "HTTP \(prepassStatusCode)",
+                    payloadPreview: Self.payloadPreview(from: prepassData)
+                )
+
+                guard (200..<300).contains(prepassStatusCode) else {
+                    let message = ResponsesChatCompletionsBridge.extractErrorMessage(from: prepassData)
+                    await recordDebugRequestFinished(
+                        id: requestID,
+                        status: .failed,
+                        httpStatus: prepassStatusCode,
+                        errorMessage: message
+                    )
+                    return jsonResponse(statusCode: prepassStatusCode, body: errorPayload(message: message))
+                }
+                guard let attachmentSummary = ResponsesChatCompletionsBridge.extractAssistantText(from: prepassData) else {
+                    throw ResponsesChatCompletionsBridge.TranslationError.invalidResponse(L10n.tr("多模态模型未返回可转交给主模型的文本摘要。"))
+                }
+                await appendDebugEvent(
+                    requestID: requestID,
+                    title: L10n.tr("多模态摘要"),
+                    detail: L10n.tr("%d 字符", attachmentSummary.count),
+                    payloadPreview: attachmentSummary
+                )
+
+                upstreamRequest = try ResponsesChatCompletionsBridge.makeTextOnlyRequestData(
+                    from: requestObject,
+                    attachmentSummary: attachmentSummary,
+                    fallbackModel: state.defaultModel,
+                    requiresNonEmptyToolParameters: usesMiniMaxReasoning,
+                    usesMaxCompletionTokens: usesMiMoCompatibility,
+                    supportsParallelToolCalls: !usesMiMoCompatibility,
+                    usesMiniMaxReasoning: usesMiniMaxReasoning,
+                    usesDeepSeekReasoning: usesReasoningContent
+                )
+            } else {
+                upstreamRequest = try ResponsesChatCompletionsBridge.makeChatCompletionsRequestData(
+                    from: requestObject,
+                    fallbackModel: state.defaultModel,
+                    requiresNonEmptyToolParameters: usesMiniMaxReasoning,
+                    usesMaxCompletionTokens: usesMiMoCompatibility,
+                    supportsParallelToolCalls: !usesMiMoCompatibility,
+                    usesMiniMaxReasoning: usesMiniMaxReasoning,
+                    usesDeepSeekReasoning: usesReasoningContent
+                )
+            }
             let parameterizedUpstreamRequest = try ProviderModelSettings.applyParameters(
                 toJSONData: upstreamRequest,
-                requestedModel: requestObject["model"] as? String,
+                requestedModel: effectiveModel,
                 settings: state.modelSettings,
                 fallbackModel: state.defaultModel
+            )
+            await appendDebugEvent(
+                requestID: requestID,
+                title: L10n.tr("主模型请求"),
+                detail: hasMedia && multimodalModel != nil ? "model=\(effectiveModel) text-only" : "model=\(effectiveModel)",
+                payloadPreview: Self.payloadPreview(from: parameterizedUpstreamRequest)
             )
             let (statusCode, data) = try await sendUpstreamRequestHandlingOverload(
                 baseURL: state.baseURL,
                 apiKey: state.apiKey,
                 body: parameterizedUpstreamRequest
             )
+            await appendDebugEvent(
+                requestID: requestID,
+                title: L10n.tr("主模型响应"),
+                detail: "HTTP \(statusCode)",
+                payloadPreview: Self.payloadPreview(from: data)
+            )
 
             guard (200..<300).contains(statusCode) else {
-                return jsonResponse(
-                    statusCode: statusCode,
-                    body: errorPayload(message: ResponsesChatCompletionsBridge.extractErrorMessage(from: data))
+                let message = ResponsesChatCompletionsBridge.extractErrorMessage(from: data)
+                await recordDebugRequestFinished(
+                    id: requestID,
+                    status: .failed,
+                    httpStatus: statusCode,
+                    errorMessage: message
                 )
+                return jsonResponse(statusCode: statusCode, body: errorPayload(message: message))
             }
 
             let responseData = try ResponsesChatCompletionsBridge.makeResponsesResponseData(
@@ -333,6 +474,7 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
                 throw ResponsesChatCompletionsBridge.TranslationError.invalidResponse(L10n.tr("本地桥接响应格式无效。"))
             }
 
+            await recordDebugRequestFinished(id: requestID, status: .completed, httpStatus: 200, errorMessage: nil)
             if wantsStream {
                 return HTTPResponse(
                     statusCode: 200,
@@ -343,6 +485,14 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
 
             return jsonResponse(statusCode: 200, body: responseData)
         } catch {
+            if didStartDebugRequest {
+                await recordDebugRequestFinished(
+                    id: requestID,
+                    status: .failed,
+                    httpStatus: 502,
+                    errorMessage: error.localizedDescription
+                )
+            }
             return jsonResponse(statusCode: 502, body: errorPayload(message: error.localizedDescription))
         }
     }
@@ -354,16 +504,77 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
         return object
     }
 
-    private func currentState() -> (
-        baseURL: String,
-        apiKeyEnvName: String,
-        apiKey: String,
-        defaultModel: String,
-        availableModels: [String],
-        modelSettings: [ProviderModelSettings]
-    ) {
+    private func currentState() -> State {
         stateQueue.sync {
-            (upstreamBaseURL, apiKeyEnvName, apiKey, defaultModel, availableModels, modelSettings)
+            State(
+                baseURL: upstreamBaseURL,
+                bridgeBaseURL: localBaseURL ?? "",
+                apiKeyEnvName: apiKeyEnvName,
+                apiKey: apiKey,
+                defaultModel: defaultModel,
+                availableModels: availableModels,
+                modelSettings: modelSettings
+            )
+        }
+    }
+
+    private func recordDebugRequestStarted(
+        id: UUID,
+        state: State,
+        path: String,
+        model: String,
+        stream: Bool,
+        hasMedia: Bool,
+        multimodalModel: String?,
+        payloadPreview: String?
+    ) async {
+        guard let debugStore else { return }
+        await MainActor.run {
+            debugStore.recordRequestStarted(
+                id: id,
+                bridgeBaseURL: state.bridgeBaseURL,
+                upstreamBaseURL: state.baseURL,
+                path: path,
+                model: model,
+                stream: stream,
+                hasMedia: hasMedia,
+                multimodalModel: multimodalModel,
+                payloadPreview: payloadPreview
+            )
+        }
+    }
+
+    private func recordDebugRequestFinished(
+        id: UUID,
+        status: ProviderBridgeDebugRequestStatus,
+        httpStatus: Int?,
+        errorMessage: String?
+    ) async {
+        guard let debugStore else { return }
+        await MainActor.run {
+            debugStore.recordRequestFinished(
+                id: id,
+                status: status,
+                httpStatus: httpStatus,
+                errorMessage: errorMessage
+            )
+        }
+    }
+
+    private func appendDebugEvent(
+        requestID: UUID,
+        title: String,
+        detail: String,
+        payloadPreview: String?
+    ) async {
+        guard let debugStore else { return }
+        await MainActor.run {
+            debugStore.appendEvent(
+                requestID: requestID,
+                title: title,
+                detail: detail,
+                payloadPreview: payloadPreview
+            )
         }
     }
 
@@ -412,6 +623,91 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
         (try? JSONSerialization.data(withJSONObject: object, options: [])) ?? Data("{}".utf8)
     }
 
+    private func debugAnalysisDetail(hasMedia: Bool, multimodalModel: String?) -> String {
+        let mediaText = hasMedia ? L10n.tr("已检测媒体") : L10n.tr("未检测媒体")
+        let multimodalText = multimodalModel.map { L10n.tr("关联多模态模型：%@", $0) } ?? L10n.tr("未配置关联多模态模型")
+        return "\(mediaText), \(multimodalText)"
+    }
+
+    private func resolvedProviderModel(_ requestedModel: String?, state: State) -> String {
+        let trimmedRequestedModel = requestedModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmedRequestedModel.isEmpty else {
+            return state.defaultModel
+        }
+
+        var knownModels = Set(state.availableModels.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+        for setting in state.modelSettings {
+            knownModels.insert(setting.model.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        knownModels.remove("")
+
+        // Provider bridge 是协议边界，不能把 Codex 内置 gpt-* 模型名透传给自定义上游。
+        return knownModels.contains(trimmedRequestedModel) ? trimmedRequestedModel : state.defaultModel
+    }
+
+    private static func payloadPreview(from data: Data) -> String {
+        if let object = try? JSONSerialization.jsonObject(with: data) {
+            let redactedObject = redactedPayload(object, key: nil)
+            if JSONSerialization.isValidJSONObject(redactedObject),
+               let previewData = try? JSONSerialization.data(withJSONObject: redactedObject, options: [.prettyPrinted, .sortedKeys]),
+               let text = String(data: previewData, encoding: .utf8)
+            {
+                return truncatedPayloadPreview(text)
+            }
+        }
+
+        let text = String(data: data, encoding: .utf8) ?? "<\(data.count) bytes>"
+        return truncatedPayloadPreview(text)
+    }
+
+    private static func redactedPayload(_ value: Any, key: String?) -> Any {
+        if let dictionary = value as? [String: Any] {
+            var redacted = [String: Any]()
+            for (childKey, childValue) in dictionary {
+                redacted[childKey] = redactedPayload(childValue, key: childKey)
+            }
+            return redacted
+        }
+        if let array = value as? [Any] {
+            return array.map { redactedPayload($0, key: key) }
+        }
+        if let string = value as? String {
+            return redactedString(string, key: key)
+        }
+        return value
+    }
+
+    // 调试预览保留媒体类型和长度，隐藏 base64 正文，避免大附件撑爆时间线。
+    private static func redactedString(_ string: String, key: String?) -> String {
+        if string.hasPrefix("data:") {
+            return redactedDataURL(string)
+        }
+
+        switch key?.lowercased() {
+        case "file_data", "data":
+            return "<redacted \(string.count) chars>"
+        default:
+            return string
+        }
+    }
+
+    private static func redactedDataURL(_ string: String) -> String {
+        guard let commaIndex = string.firstIndex(of: ",") else {
+            return "<redacted data URL \(string.count) chars>"
+        }
+        let header = string[..<commaIndex]
+        let payloadStart = string.index(after: commaIndex)
+        let payloadLength = string.distance(from: payloadStart, to: string.endIndex)
+        return "\(header),<redacted \(payloadLength) chars>"
+    }
+
+    private static func truncatedPayloadPreview(_ text: String) -> String {
+        if text.count <= ProviderBridgeDebugStore.payloadPreviewLimit {
+            return text
+        }
+        return String(text.prefix(ProviderBridgeDebugStore.payloadPreviewLimit)) + "\n... truncated ..."
+    }
+
     private func modelObjects() -> [[String: Any]] {
         let state = currentState()
         let models = state.availableModels.isEmpty ? [state.defaultModel] : state.availableModels
@@ -455,6 +751,11 @@ private final class OpenAICompatibleProviderCodexBridgeServer: @unchecked Sendab
         let rawURL = URL(string: trimmedBaseURL)
             ?? URL(string: "https://\(trimmedBaseURL)")
         return rawURL?.host?.lowercased() == "api.deepseek.com"
+    }
+
+    private func trimmedString(_ value: Any?) -> String? {
+        let trimmed = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func reasonPhrase(for statusCode: Int) -> String {

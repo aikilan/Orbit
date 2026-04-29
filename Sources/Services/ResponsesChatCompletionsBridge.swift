@@ -1,6 +1,12 @@
 import Foundation
 
 enum ResponsesChatCompletionsBridge {
+    private enum MediaKind {
+        case image
+        case audio
+        case video
+    }
+
     private struct TextToolCall {
         let name: String
         let arguments: String
@@ -33,6 +39,26 @@ enum ResponsesChatCompletionsBridge {
             throw TranslationError.invalidRequest(L10n.tr("Responses 请求不是有效的 JSON。"))
         }
 
+        return try makeChatCompletionsRequestData(
+            from: request,
+            fallbackModel: fallbackModel,
+            requiresNonEmptyToolParameters: requiresNonEmptyToolParameters,
+            usesMaxCompletionTokens: usesMaxCompletionTokens,
+            supportsParallelToolCalls: supportsParallelToolCalls,
+            usesMiniMaxReasoning: usesMiniMaxReasoning,
+            usesDeepSeekReasoning: usesDeepSeekReasoning
+        )
+    }
+
+    static func makeChatCompletionsRequestData(
+        from request: [String: Any],
+        fallbackModel: String,
+        requiresNonEmptyToolParameters: Bool = false,
+        usesMaxCompletionTokens: Bool = false,
+        supportsParallelToolCalls: Bool = true,
+        usesMiniMaxReasoning: Bool = false,
+        usesDeepSeekReasoning: Bool = false
+    ) throws -> Data {
         let object = try makeChatCompletionsRequestObject(
             from: request,
             fallbackModel: fallbackModel,
@@ -447,6 +473,206 @@ enum ResponsesChatCompletionsBridge {
             ?? L10n.tr("上游模型返回了未知错误。")
     }
 
+    static func containsSupportedMedia(in request: [String: Any]) -> Bool {
+        inputContainsSupportedMedia(request["input"])
+    }
+
+    static func makeMultimodalPrepassRequestData(
+        from request: [String: Any],
+        multimodalModel: String,
+        fallbackModel: String,
+        requiresNonEmptyToolParameters: Bool = false,
+        usesMaxCompletionTokens: Bool = false,
+        supportsParallelToolCalls: Bool = true,
+        usesMiniMaxReasoning: Bool = false,
+        usesDeepSeekReasoning: Bool = false
+    ) throws -> Data {
+        var prepassRequest = request
+        prepassRequest["model"] = multimodalModel
+        prepassRequest["instructions"] = multimodalPrepassInstructions
+        prepassRequest["stream"] = false
+        prepassRequest.removeValue(forKey: "tools")
+        prepassRequest.removeValue(forKey: "tool_choice")
+        prepassRequest.removeValue(forKey: "parallel_tool_calls")
+
+        return try makeChatCompletionsRequestData(
+            from: prepassRequest,
+            fallbackModel: fallbackModel,
+            requiresNonEmptyToolParameters: requiresNonEmptyToolParameters,
+            usesMaxCompletionTokens: usesMaxCompletionTokens,
+            supportsParallelToolCalls: supportsParallelToolCalls,
+            usesMiniMaxReasoning: usesMiniMaxReasoning,
+            usesDeepSeekReasoning: usesDeepSeekReasoning
+        )
+    }
+
+    static func makeTextOnlyRequestData(
+        from request: [String: Any],
+        attachmentSummary: String,
+        fallbackModel: String,
+        requiresNonEmptyToolParameters: Bool = false,
+        usesMaxCompletionTokens: Bool = false,
+        supportsParallelToolCalls: Bool = true,
+        usesMiniMaxReasoning: Bool = false,
+        usesDeepSeekReasoning: Bool = false
+    ) throws -> Data {
+        var textOnlyRequest = request
+        textOnlyRequest["input"] = textOnlyInput(from: request["input"], attachmentSummary: attachmentSummary)
+        return try makeChatCompletionsRequestData(
+            from: textOnlyRequest,
+            fallbackModel: fallbackModel,
+            requiresNonEmptyToolParameters: requiresNonEmptyToolParameters,
+            usesMaxCompletionTokens: usesMaxCompletionTokens,
+            supportsParallelToolCalls: supportsParallelToolCalls,
+            usesMiniMaxReasoning: usesMiniMaxReasoning,
+            usesDeepSeekReasoning: usesDeepSeekReasoning
+        )
+    }
+
+    static func extractAssistantText(from data: Data) -> String? {
+        guard
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let choices = object["choices"] as? [Any]
+        else {
+            return nil
+        }
+
+        for choiceValue in choices {
+            guard
+                let choice = choiceValue as? [String: Any],
+                let message = choice["message"] as? [String: Any],
+                let text = assistantContentText(from: message["content"])
+            else {
+                continue
+            }
+            return text
+        }
+        return nil
+    }
+
+    private static var multimodalPrepassInstructions: String {
+        L10n.tr(
+            "你是多模态附件解析模型。请只基于用户提供的图片、音频或视频附件和用户文本，输出供后续文本代码模型使用的事实摘要。保留与任务相关的文字、数字、界面、文件、错误和约束；不要调用工具，不要编写代码；不确定的内容标注“不确定”。"
+        )
+    }
+
+    private static func inputContainsSupportedMedia(_ input: Any?) -> Bool {
+        if let item = input as? [String: Any] {
+            return messageContainsSupportedMedia(item)
+        }
+        guard let items = input as? [Any] else {
+            return false
+        }
+        return items.contains { itemValue in
+            guard let item = itemValue as? [String: Any] else { return false }
+            return messageContainsSupportedMedia(item)
+        }
+    }
+
+    private static func messageContainsSupportedMedia(_ item: [String: Any]) -> Bool {
+        guard
+            normalizedInputItemType(from: item) == "message",
+            let content = item["content"] as? [Any]
+        else {
+            return false
+        }
+        return content.contains { contentValue in
+            guard let contentItem = contentValue as? [String: Any] else {
+                return false
+            }
+            return isSupportedMediaContentItem(contentItem)
+        }
+    }
+
+    private static func textOnlyInput(from input: Any?, attachmentSummary: String) -> Any {
+        if var item = input as? [String: Any] {
+            if normalizedInputItemType(from: item) == "message" {
+                item["content"] = textOnlyContent(from: item["content"])
+            }
+            return [item, attachmentSummaryMessage(attachmentSummary)]
+        }
+        guard let items = input as? [Any] else {
+            return input ?? [attachmentSummaryMessage(attachmentSummary)]
+        }
+
+        var textOnlyItems = items.map { itemValue -> Any in
+            guard var item = itemValue as? [String: Any] else {
+                return itemValue
+            }
+            guard normalizedInputItemType(from: item) == "message" else {
+                return item
+            }
+            item["content"] = textOnlyContent(from: item["content"])
+            return item
+        }
+        textOnlyItems.append(attachmentSummaryMessage(attachmentSummary))
+        return textOnlyItems
+    }
+
+    private static func textOnlyContent(from content: Any?) -> Any {
+        if let text = content as? String {
+            return text
+        }
+        guard let contentItems = content as? [Any] else {
+            return ""
+        }
+        return contentItems.compactMap { contentValue -> Any? in
+            guard let contentItem = contentValue as? [String: Any] else {
+                return contentValue
+            }
+            return isSupportedMediaContentItem(contentItem) ? nil : contentItem
+        }
+    }
+
+    // 主模型只接收文本摘要，避免 text-only 模型再次收到媒体 part。
+    private static func attachmentSummaryMessage(_ summary: String) -> [String: Any] {
+        [
+            "type": "message",
+            "role": "user",
+            "content": [
+                [
+                    "type": "input_text",
+                    "text": L10n.tr("以下是多模态模型对用户附件的解析结果：\n\n%@", summary),
+                ],
+            ],
+        ]
+    }
+
+    private static func assistantContentText(from content: Any?) -> String? {
+        if let text = trimmedString(content) {
+            return text
+        }
+        guard let contentItems = content as? [Any] else {
+            return nil
+        }
+        let textParts = contentItems.compactMap { contentValue -> String? in
+            guard
+                let contentItem = contentValue as? [String: Any],
+                let type = trimmedString(contentItem["type"]),
+                type == "text" || type == "output_text"
+            else {
+                return nil
+            }
+            return trimmedString(contentItem["text"])
+        }
+        let joined = textParts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return joined.isEmpty ? nil : joined
+    }
+
+    private static func isSupportedMediaContentItem(_ item: [String: Any]) -> Bool {
+        guard let type = trimmedString(item["type"]) else {
+            return false
+        }
+        switch type {
+        case "input_image", "image_url", "input_audio", "video_url":
+            return true
+        case "input_file":
+            return fileDataMediaPart(from: item) != nil
+        default:
+            return false
+        }
+    }
+
     private static func makeChatCompletionsRequestObject(
         from request: [String: Any],
         fallbackModel: String,
@@ -786,7 +1012,7 @@ enum ResponsesChatCompletionsBridge {
 
         var textParts = [String]()
         var richParts = [[String: Any]]()
-        var hasImage = false
+        var hasRichMedia = false
 
         for itemValue in content {
             guard let item = itemValue as? [String: Any], let type = trimmedString(item["type"]) else { continue }
@@ -799,26 +1025,151 @@ enum ResponsesChatCompletionsBridge {
                     "text": text,
                 ])
             case "input_image":
-                guard let imageURL = trimmedString(item["image_url"]) else { continue }
-                hasImage = true
+                guard let imageURL = mediaContentObject(from: item["image_url"], requiredKey: "url") else { continue }
+                hasRichMedia = true
                 richParts.append([
                     "type": "image_url",
-                    "image_url": [
-                        "url": imageURL,
-                    ],
+                    "image_url": imageURL,
                 ])
+            case "image_url":
+                guard let imageURL = mediaContentObject(from: item["image_url"], requiredKey: "url") else { continue }
+                hasRichMedia = true
+                richParts.append([
+                    "type": "image_url",
+                    "image_url": imageURL,
+                ])
+            case "input_audio":
+                guard let inputAudio = mediaContentObject(from: item["input_audio"], requiredKey: "data") else { continue }
+                hasRichMedia = true
+                richParts.append([
+                    "type": "input_audio",
+                    "input_audio": inputAudio,
+                ])
+            case "video_url":
+                guard let videoURL = mediaContentObject(from: item["video_url"], requiredKey: "url") else { continue }
+                hasRichMedia = true
+                richParts.append([
+                    "type": "video_url",
+                    "video_url": videoURL,
+                ])
+            case "input_file":
+                guard let mediaPart = fileDataMediaPart(from: item) else { continue }
+                hasRichMedia = true
+                richParts.append(mediaPart)
             default:
                 continue
             }
         }
 
-        if hasImage {
+        if hasRichMedia {
             return richParts
         }
         if !textParts.isEmpty {
             return textParts.joined(separator: "\n\n")
         }
         return role == "assistant" ? NSNull() : ""
+    }
+
+    // Normalizes Responses media parts into ChatCompletions media payload objects.
+    private static func mediaContentObject(from value: Any?, requiredKey: String) -> [String: Any]? {
+        if let string = trimmedString(value) {
+            return [requiredKey: string]
+        }
+        guard
+            var object = value as? [String: Any],
+            let requiredValue = trimmedString(object[requiredKey])
+        else {
+            return nil
+        }
+        object[requiredKey] = requiredValue
+        return object
+    }
+
+    private static func fileDataMediaPart(from item: [String: Any]) -> [String: Any]? {
+        guard
+            let fileData = mediaContentObject(from: item["file_data"], requiredKey: "url")?["url"] as? String,
+            let mediaKind = mediaKind(fromFileData: fileData, item: item)
+        else {
+            return nil
+        }
+
+        switch mediaKind {
+        case .image:
+            return [
+                "type": "image_url",
+                "image_url": [
+                    "url": fileData,
+                ],
+            ]
+        case .audio:
+            return [
+                "type": "input_audio",
+                "input_audio": [
+                    "data": fileData,
+                ],
+            ]
+        case .video:
+            return [
+                "type": "video_url",
+                "video_url": [
+                    "url": fileData,
+                ],
+            ]
+        }
+    }
+
+    private static func mediaKind(fromFileData fileData: String, item: [String: Any]) -> MediaKind? {
+        if let mediaType = dataURLMediaType(from: fileData) {
+            return mediaKind(fromMediaType: mediaType)
+        }
+        if let mediaType = trimmedString(item["media_type"] ?? item["mime_type"] ?? item["content_type"]) {
+            return mediaKind(fromMediaType: mediaType)
+        }
+        if let filename = trimmedString(item["filename"]) {
+            return mediaKind(fromFilename: filename)
+        }
+        return nil
+    }
+
+    private static func dataURLMediaType(from value: String) -> String? {
+        guard value.lowercased().hasPrefix("data:"),
+              let commaIndex = value.firstIndex(of: ",")
+        else {
+            return nil
+        }
+
+        let metadataStart = value.index(value.startIndex, offsetBy: 5)
+        let metadata = value[metadataStart..<commaIndex]
+        let parts = metadata.split(separator: ";", omittingEmptySubsequences: true)
+        return parts.first.map(String.init)
+    }
+
+    private static func mediaKind(fromMediaType mediaType: String) -> MediaKind? {
+        let normalized = mediaType.lowercased()
+        if normalized.hasPrefix("image/") {
+            return .image
+        }
+        if normalized.hasPrefix("audio/") {
+            return .audio
+        }
+        if normalized.hasPrefix("video/") {
+            return .video
+        }
+        return nil
+    }
+
+    private static func mediaKind(fromFilename filename: String) -> MediaKind? {
+        let fileExtension = (filename as NSString).pathExtension.lowercased()
+        switch fileExtension {
+        case "apng", "avif", "gif", "heic", "heif", "jpeg", "jpg", "png", "webp":
+            return .image
+        case "aac", "flac", "m4a", "mp3", "ogg", "opus", "wav":
+            return .audio
+        case "avi", "m4v", "mov", "mp4", "mpeg", "mpg", "webm":
+            return .video
+        default:
+            return nil
+        }
     }
 
     private static func makeToolCall(from item: [String: Any], type: String) -> [String: Any] {

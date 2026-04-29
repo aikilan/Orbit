@@ -295,6 +295,17 @@ struct AddAccountSheet: View {
                         .frame(minWidth: 220)
 
                         TextField(
+                            L10n.tr("关联多模态模型"),
+                            text: Binding(
+                                get: { model.addAccountProviderModelSettings[index].multimodalModel ?? "" },
+                                set: { model.updateProviderModelMultimodalModel(at: index, model: $0) }
+                            )
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: 170)
+                        .help(L10n.tr("有附件时先用该模型解析，再交给主模型执行"))
+
+                        TextField(
                             "temperature",
                             value: Binding(
                                 get: { model.addAccountProviderModelSettings[index].temperature },
@@ -327,7 +338,7 @@ struct AddAccountSheet: View {
                 }
             }
 
-            Text(L10n.tr("默认 temperature = 0.3，top_p = 0.95；启动时会按所选模型写入请求参数。"))
+            Text(L10n.tr("默认 temperature = 0.3，top_p = 0.95；关联多模态模型为空时不会启用附件预处理。"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

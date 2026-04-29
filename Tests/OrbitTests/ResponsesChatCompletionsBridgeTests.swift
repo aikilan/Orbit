@@ -223,6 +223,154 @@ final class ResponsesChatCompletionsBridgeTests: XCTestCase {
         XCTAssertFalse(streamText.contains("<tool_call>"))
     }
 
+    func testMakeChatCompletionsRequestDataForwardsSupportedMediaParts() throws {
+        let request: [String: Any] = [
+            "model": "mimo-v2.5",
+            "input": [
+                [
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "input_text",
+                            "text": "看一下附件",
+                        ],
+                        [
+                            "type": "input_image",
+                            "image_url": "data:image/png;base64,aaa",
+                        ],
+                        [
+                            "type": "input_audio",
+                            "input_audio": [
+                                "data": "https://example.test/audio.mp3",
+                            ],
+                        ],
+                        [
+                            "type": "video_url",
+                            "video_url": [
+                                "url": "https://example.test/video.mp4",
+                                "media_resolution": "low",
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]
+
+        let requestData = try JSONSerialization.data(withJSONObject: request)
+        let data = try ResponsesChatCompletionsBridge.makeChatCompletionsRequestData(
+            from: requestData,
+            fallbackModel: "mimo-v2.5"
+        )
+        let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        let content = try XCTUnwrap(messages.first?["content"] as? [[String: Any]])
+        let imageURL = try XCTUnwrap(content[1]["image_url"] as? [String: Any])
+        let inputAudio = try XCTUnwrap(content[2]["input_audio"] as? [String: Any])
+        let videoURL = try XCTUnwrap(content[3]["video_url"] as? [String: Any])
+
+        XCTAssertEqual(content.count, 4)
+        XCTAssertEqual(content[0]["type"] as? String, "text")
+        XCTAssertEqual(content[0]["text"] as? String, "看一下附件")
+        XCTAssertEqual(content[1]["type"] as? String, "image_url")
+        XCTAssertEqual(imageURL["url"] as? String, "data:image/png;base64,aaa")
+        XCTAssertEqual(content[2]["type"] as? String, "input_audio")
+        XCTAssertEqual(inputAudio["data"] as? String, "https://example.test/audio.mp3")
+        XCTAssertEqual(content[3]["type"] as? String, "video_url")
+        XCTAssertEqual(videoURL["url"] as? String, "https://example.test/video.mp4")
+        XCTAssertEqual(videoURL["media_resolution"] as? String, "low")
+    }
+
+    func testMakeChatCompletionsRequestDataDoesNotForwardUnsupportedInputFileParts() throws {
+        let request: [String: Any] = [
+            "model": "mimo-v2.5-pro",
+            "input": [
+                [
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "input_text",
+                            "text": "请参考附件",
+                        ],
+                        [
+                            "type": "input_file",
+                            "file_id": "file_123",
+                        ],
+                    ],
+                ],
+            ],
+        ]
+
+        let requestData = try JSONSerialization.data(withJSONObject: request)
+        let data = try ResponsesChatCompletionsBridge.makeChatCompletionsRequestData(
+            from: requestData,
+            fallbackModel: "mimo-v2.5-pro"
+        )
+        let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        let content = try XCTUnwrap(messages.first?["content"] as? String)
+        let bodyText = try XCTUnwrap(String(data: data, encoding: .utf8))
+
+        XCTAssertEqual(content, "请参考附件")
+        XCTAssertFalse(bodyText.contains("input_file"))
+        XCTAssertFalse(bodyText.contains("file_123"))
+    }
+
+    func testMakeChatCompletionsRequestDataConvertsInputFileFileDataMediaParts() throws {
+        let request: [String: Any] = [
+            "model": "mimo-v2.5",
+            "input": [
+                [
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "input_text",
+                            "text": "分析附件",
+                        ],
+                        [
+                            "type": "input_file",
+                            "filename": "mockup.png",
+                            "file_data": "data:image/png;base64,aaa",
+                        ],
+                        [
+                            "type": "input_file",
+                            "filename": "voice.wav",
+                            "file_data": "data:audio/wav;base64,bbb",
+                        ],
+                        [
+                            "type": "input_file",
+                            "filename": "demo.mp4",
+                            "file_data": "data:video/mp4;base64,ccc",
+                        ],
+                    ],
+                ],
+            ],
+        ]
+
+        let requestData = try JSONSerialization.data(withJSONObject: request)
+        let data = try ResponsesChatCompletionsBridge.makeChatCompletionsRequestData(
+            from: requestData,
+            fallbackModel: "mimo-v2.5"
+        )
+        let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        let content = try XCTUnwrap(messages.first?["content"] as? [[String: Any]])
+        let imageURL = try XCTUnwrap(content[1]["image_url"] as? [String: Any])
+        let inputAudio = try XCTUnwrap(content[2]["input_audio"] as? [String: Any])
+        let videoURL = try XCTUnwrap(content[3]["video_url"] as? [String: Any])
+
+        XCTAssertEqual(content.count, 4)
+        XCTAssertEqual(content[0]["type"] as? String, "text")
+        XCTAssertEqual(content[1]["type"] as? String, "image_url")
+        XCTAssertEqual(imageURL["url"] as? String, "data:image/png;base64,aaa")
+        XCTAssertEqual(content[2]["type"] as? String, "input_audio")
+        XCTAssertEqual(inputAudio["data"] as? String, "data:audio/wav;base64,bbb")
+        XCTAssertEqual(content[3]["type"] as? String, "video_url")
+        XCTAssertEqual(videoURL["url"] as? String, "data:video/mp4;base64,ccc")
+    }
+
     private func acpUpdate(sessionUpdate: String, content: String) throws -> Data {
         try acpUpdate([
             "sessionUpdate": sessionUpdate,

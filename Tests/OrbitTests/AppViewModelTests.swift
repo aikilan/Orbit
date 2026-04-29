@@ -1409,7 +1409,7 @@ final class AppViewModelTests: XCTestCase {
         harness.model.addAccountDefaultModel = "model-b"
         harness.model.addAccountProviderModelSettings = [
             ProviderModelSettings(model: "model-a", temperature: 0.2, topP: 0.9),
-            ProviderModelSettings(model: "model-b", temperature: 0.7, topP: 0.8),
+            ProviderModelSettings(model: "model-b", temperature: 0.7, topP: 0.8, multimodalModel: " model-b-vision "),
         ]
         harness.model.apiKeyInput = "sk-custom-openai"
 
@@ -1422,7 +1422,7 @@ final class AppViewModelTests: XCTestCase {
             account.providerModelSettings,
             [
                 ProviderModelSettings(model: "model-a", temperature: 0.2, topP: 0.9),
-                ProviderModelSettings(model: "model-b", temperature: 0.7, topP: 0.8),
+                ProviderModelSettings(model: "model-b", temperature: 0.7, topP: 0.8, multimodalModel: "model-b-vision"),
             ]
         )
     }

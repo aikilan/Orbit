@@ -105,6 +105,11 @@ actor ClaudeProviderCodexBridgeManager {
 extension ClaudeProviderCodexBridgeManager: ClaudeProviderCodexBridgeManaging {}
 
 private final class ClaudeProviderCodexBridgeServer: @unchecked Sendable {
+    private struct DataURL {
+        let mediaType: String
+        let data: String
+    }
+
     private final class ResumeState: @unchecked Sendable {
         var didResume = false
     }
@@ -576,6 +581,14 @@ private final class ClaudeProviderCodexBridgeServer: @unchecked Sendable {
                     "type": "text",
                     "text": (contentItem["text"] as? String) ?? "",
                 ])
+            case "input_image", "image_url":
+                if let image = imageContentBlock(from: contentItem) {
+                    translated.append(image)
+                }
+            case "input_file":
+                if let file = fileContentBlock(from: contentItem) {
+                    translated.append(file)
+                }
             case "function_call":
                 translated.append([
                     "type": "tool_use",
@@ -588,6 +601,112 @@ private final class ClaudeProviderCodexBridgeServer: @unchecked Sendable {
             }
         }
         return translated
+    }
+
+    private static func imageContentBlock(from contentItem: [String: Any]) -> [String: Any]? {
+        guard let imageURL = mediaURLString(from: contentItem["image_url"]) else {
+            return nil
+        }
+        return imageContentBlock(fromMediaURL: imageURL)
+    }
+
+    // Only portable file_data can cross this bridge; provider-local file_id values are not reusable.
+    private static func fileContentBlock(from contentItem: [String: Any]) -> [String: Any]? {
+        guard
+            let fileData = mediaURLString(from: contentItem["file_data"]),
+            let dataURL = parsedDataURL(from: fileData)
+        else {
+            return nil
+        }
+
+        if dataURL.mediaType.hasPrefix("image/") {
+            return imageContentBlock(from: dataURL)
+        }
+
+        guard dataURL.mediaType == "application/pdf" || dataURL.mediaType == "text/plain" else {
+            return nil
+        }
+
+        var block: [String: Any] = [
+            "type": "document",
+            "source": [
+                "type": "base64",
+                "media_type": dataURL.mediaType,
+                "data": dataURL.data,
+            ],
+        ]
+        if let filename = trimmedString(contentItem["filename"]) {
+            block["title"] = filename
+        }
+        return block
+    }
+
+    private static func imageContentBlock(fromMediaURL value: String) -> [String: Any]? {
+        if let dataURL = parsedDataURL(from: value) {
+            return imageContentBlock(from: dataURL)
+        }
+        return [
+            "type": "image",
+            "source": [
+                "type": "url",
+                "url": value,
+            ],
+        ]
+    }
+
+    private static func imageContentBlock(from dataURL: DataURL) -> [String: Any]? {
+        guard dataURL.mediaType.hasPrefix("image/") else {
+            return nil
+        }
+        return [
+            "type": "image",
+            "source": [
+                "type": "base64",
+                "media_type": dataURL.mediaType,
+                "data": dataURL.data,
+            ],
+        ]
+    }
+
+    private static func mediaURLString(from value: Any?) -> String? {
+        if let string = trimmedString(value) {
+            return string
+        }
+        guard let object = value as? [String: Any] else {
+            return nil
+        }
+        return trimmedString(object["url"])
+    }
+
+    private static func parsedDataURL(from value: String) -> DataURL? {
+        guard value.lowercased().hasPrefix("data:"),
+              let commaIndex = value.firstIndex(of: ",")
+        else {
+            return nil
+        }
+
+        let metadataStart = value.index(value.startIndex, offsetBy: 5)
+        let metadata = value[metadataStart..<commaIndex]
+        let data = String(value[value.index(after: commaIndex)...])
+        let parts = metadata.split(separator: ";", omittingEmptySubsequences: true)
+        guard
+            let mediaType = parts.first.map(String.init)?.lowercased(),
+            parts.contains(where: { $0.lowercased() == "base64" }),
+            !mediaType.isEmpty,
+            !data.isEmpty
+        else {
+            return nil
+        }
+
+        return DataURL(mediaType: mediaType, data: data)
+    }
+
+    private static func trimmedString(_ value: Any?) -> String? {
+        guard let string = value as? String else {
+            return nil
+        }
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func translateTools(from value: Any?) -> [[String: Any]] {

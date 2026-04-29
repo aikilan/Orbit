@@ -107,6 +107,121 @@ final class ClaudeProviderCodexBridgeManagerTests: XCTestCase {
         XCTAssertEqual(upstreamObject["top_p"] as? Double, 0.88)
     }
 
+    func testBridgeForwardsSupportedCodexAttachmentsToClaudeMessages() async throws {
+        actor Recorder {
+            var lastRequestBody: Data?
+
+            func store(_ data: Data) {
+                lastRequestBody = data
+            }
+
+            func body() -> Data? {
+                lastRequestBody
+            }
+        }
+
+        let recorder = Recorder()
+        let upstreamResponse = try JSONSerialization.data(withJSONObject: [
+            "id": "msg_media",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-sonnet-4.5",
+            "content": [
+                ["type": "text", "text": "ok"],
+            ],
+            "stop_reason": "end_turn",
+            "usage": [
+                "input_tokens": 1,
+                "output_tokens": 1,
+            ],
+        ])
+        let manager = ClaudeProviderCodexBridgeManager(
+            sendUpstreamRequest: { _, _, body in
+                await recorder.store(body)
+                return (200, upstreamResponse)
+            }
+        )
+
+        let bridge = try await manager.prepareBridge(
+            accountID: UUID(),
+            baseURL: "https://api.anthropic.com/v1",
+            apiKeyEnvName: "ANTHROPIC_API_KEY",
+            apiKey: "sk-ant-test",
+            model: "claude-sonnet-4.5",
+            availableModels: ["claude-sonnet-4.5"]
+        )
+
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "\(bridge.baseURL)/v1/responses")))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": "claude-sonnet-4.5",
+            "stream": false,
+            "input": [
+                [
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "input_text",
+                            "text": "看附件",
+                        ],
+                        [
+                            "type": "input_image",
+                            "image_url": "data:image/png;base64,aaa",
+                        ],
+                        [
+                            "type": "image_url",
+                            "image_url": [
+                                "url": "https://example.test/image.webp",
+                            ],
+                        ],
+                        [
+                            "type": "input_file",
+                            "filename": "report.pdf",
+                            "file_data": "data:application/pdf;base64,bbb",
+                        ],
+                        [
+                            "type": "input_file",
+                            "file_id": "file_openai_only",
+                        ],
+                    ],
+                ],
+            ],
+        ])
+
+        let session = URLSession(configuration: .ephemeral)
+        let (_, response) = try await session.data(for: request)
+        let httpResponse = try XCTUnwrap(response as? HTTPURLResponse)
+        let recordedBody = await recorder.body()
+        let upstreamBody = try XCTUnwrap(recordedBody)
+        let upstreamObject = try XCTUnwrap(try JSONSerialization.jsonObject(with: upstreamBody) as? [String: Any])
+        let messages = try XCTUnwrap(upstreamObject["messages"] as? [[String: Any]])
+        let content = try XCTUnwrap(messages.first?["content"] as? [[String: Any]])
+        let base64ImageSource = try XCTUnwrap(content[1]["source"] as? [String: Any])
+        let urlImageSource = try XCTUnwrap(content[2]["source"] as? [String: Any])
+        let documentSource = try XCTUnwrap(content[3]["source"] as? [String: Any])
+        let upstreamText = try XCTUnwrap(String(data: upstreamBody, encoding: .utf8))
+
+        XCTAssertEqual(httpResponse.statusCode, 200)
+        XCTAssertEqual(content.count, 4)
+        XCTAssertEqual(content[0]["type"] as? String, "text")
+        XCTAssertEqual(content[0]["text"] as? String, "看附件")
+        XCTAssertEqual(content[1]["type"] as? String, "image")
+        XCTAssertEqual(base64ImageSource["type"] as? String, "base64")
+        XCTAssertEqual(base64ImageSource["media_type"] as? String, "image/png")
+        XCTAssertEqual(base64ImageSource["data"] as? String, "aaa")
+        XCTAssertEqual(content[2]["type"] as? String, "image")
+        XCTAssertEqual(urlImageSource["type"] as? String, "url")
+        XCTAssertEqual(urlImageSource["url"] as? String, "https://example.test/image.webp")
+        XCTAssertEqual(content[3]["type"] as? String, "document")
+        XCTAssertEqual(content[3]["title"] as? String, "report.pdf")
+        XCTAssertEqual(documentSource["type"] as? String, "base64")
+        XCTAssertEqual(documentSource["media_type"] as? String, "application/pdf")
+        XCTAssertEqual(documentSource["data"] as? String, "bbb")
+        XCTAssertFalse(upstreamText.contains("file_openai_only"))
+    }
+
     func testBridgeNormalizesPersistent529To429AfterRetrying() async throws {
         actor AttemptCounter {
             private var count = 0

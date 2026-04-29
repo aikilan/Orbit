@@ -78,6 +78,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 window.title = L10n.tr("预设启动 Codex")
             case "ACP 调试", "ACP Debug":
                 window.title = L10n.tr("ACP 调试")
+            case "Bridge 调试", "Bridge Debug":
+                window.title = L10n.tr("Bridge 调试")
             default:
                 break
             }

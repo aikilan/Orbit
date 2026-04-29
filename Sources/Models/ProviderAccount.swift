@@ -69,19 +69,22 @@ struct ProviderModelSettings: Codable, Hashable, Sendable {
     static let defaultTemperature = 0.3
     static let defaultTopP = 0.95
 
-    // 用户在 Provider 接入边界配置的模型与采样参数。
+    // 用户在 Provider 接入边界配置的模型、采样参数与可选附件解析模型。
     var model: String
     var temperature: Double
     var topP: Double
+    var multimodalModel: String?
 
     init(
         model: String,
         temperature: Double = Self.defaultTemperature,
-        topP: Double = Self.defaultTopP
+        topP: Double = Self.defaultTopP,
+        multimodalModel: String? = nil
     ) {
         self.model = model
         self.temperature = temperature
         self.topP = topP
+        self.multimodalModel = multimodalModel
     }
 }
 
@@ -97,7 +100,8 @@ extension ProviderModelSettings {
                 ProviderModelSettings(
                     model: trimmedModel,
                     temperature: setting.temperature,
-                    topP: setting.topP
+                    topP: setting.topP,
+                    multimodalModel: setting.normalizedMultimodalModel
                 )
             )
         }
@@ -128,6 +132,11 @@ extension ProviderModelSettings {
         }
 
         return ProviderModelSettings(model: trimmedModel.isEmpty ? normalizedSettings[0].model : trimmedModel)
+    }
+
+    var normalizedMultimodalModel: String? {
+        let trimmed = multimodalModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     static func applyParameters(

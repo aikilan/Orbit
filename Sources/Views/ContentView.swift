@@ -340,6 +340,15 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
                 }
 
+                Button {
+                    presentWindow(id: "provider-bridge-debug")
+                } label: {
+                    Label(L10n.tr("Bridge 调试"), systemImage: "network")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(1)
+                }
+                .buttonStyle(.bordered)
+
                 if let homeButtonTitle = model.focusedPlatformHomeButtonTitle {
                     Button {
                         model.openFocusedPlatformHomeInFinder()
